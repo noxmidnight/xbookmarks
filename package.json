@@ -1,0 +1,22 @@
+{
+  "name": "xbookmarks",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Premium-style X bookmark folders — browser extension + PWA",
+  "scripts": {
+    "dev:web": "pnpm --filter @xbookmarks/web dev",
+    "dev:ext": "pnpm --filter @xbookmarks/extension dev",
+    "build": "pnpm -r build",
+    "build:web": "pnpm --filter @xbookmarks/web build",
+    "build:ext": "pnpm --filter @xbookmarks/extension build",
+    "build:android": "pnpm --filter @xbookmarks/web android:build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "devDependencies": {
+    "appwrite-cli": "^28.8.0"
+  }
+}

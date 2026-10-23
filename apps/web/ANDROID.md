@@ -1,0 +1,52 @@
+# XBookmarks Android (Capacitor)
+
+Personal sideload APK: in-app **X feed** + **Folders** without Share-sheet switching.
+
+## Install on your phone
+
+1. Copy `~/Downloads/XBookmarks.apk` to the phone (USB, Nearby Share, Drive, etc.).
+2. On Android: open the APK → allow **Install unknown apps** for that source if prompted → Install.
+3. Open **XBookmarks**.
+4. Sign in with your owner email → **Email me a code** → enter the 6-digit code from email.
+5. Tap **Feed** → log into X once inside the in-app browser.
+6. Open a tweet → tap **Bookmark** (strip under the feed, or the toolbar bookmark) → pick folder(s) → **Save**.
+7. Check **Folders** / **All** for the saved post.
+
+### USB install (from this PC)
+
+1. Phone: enable **Developer options** → **USB debugging**.
+2. Plug in USB, accept the prompt.
+3. On the PC:
+
+```bash
+adb install -r ~/Downloads/XBookmarks.apk
+```
+
+## Rebuild after code changes
+
+```bash
+export JAVA_HOME="$HOME/.local/jdk-21"
+export ANDROID_HOME="$HOME/Android/Sdk"
+pnpm build:android
+# APK: apps/web/android/app/build/outputs/apk/debug/app-debug.apk
+cp apps/web/android/app/build/outputs/apk/debug/app-debug.apk ~/Downloads/XBookmarks.apk
+```
+
+Requires JDK 21 at `~/.local/jdk-21` and Android SDK at `~/Android/Sdk` (already set up on this machine).
+
+## Notes
+
+- Save works on an **opened tweet** URL (`…/status/…`), not a card still on Home.
+- X login lives in the feed WebView (separate from Chrome). Sign in once inside **Feed**.
+- Bookmark reads the live WebView URL (SPA-safe). Prefer opening the tweet, then Bookmark.
+- The browser PWA + Share target still work; this APK is the single-app feed path.
+
+## If something fails
+
+| Symptom | Fix |
+|---|---|
+| OTP email never arrives | Check spam; confirm Appwrite email is enabled for the project |
+| X shows “browser not supported” | Reinstall latest APK (uses Chrome mobile user-agent) |
+| Bookmark says open a tweet | Open the post so the address is `…/status/…`, then tap Bookmark |
+| Saved but missing media/text | Tap Refresh on the bookmark card in Folders |
+| App won’t install | Enable Install unknown apps for Files/Drive/Chrome |

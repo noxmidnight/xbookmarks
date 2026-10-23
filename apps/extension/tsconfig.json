@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["chrome"]
+  },
+  "include": ["src", "wxt.config.ts", ".wxt/wxt.d.ts"]
+}
