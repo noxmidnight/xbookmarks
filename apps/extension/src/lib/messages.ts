@@ -1,5 +1,4 @@
 import type { CapturedTweet, Folder } from "@xbookmarks/shared";
-import type { LocalLibrary } from "./local-store";
 
 export type ExtensionMessage =
   | { type: "GET_STORAGE_MODE" }
@@ -13,17 +12,22 @@ export type ExtensionMessage =
   | { type: "DELETE_BOOKMARK"; bookmarkId: string }
   | { type: "COUNT_BY_FOLDER" }
   | { type: "EXPORT_LIBRARY" }
-  | { type: "IMPORT_LIBRARY"; library: LocalLibrary; mode?: "merge" | "replace" }
+  | {
+      type: "IMPORT_LIBRARY";
+      library: { folders: Folder[]; bookmarks: unknown[] };
+      mode?: "merge" | "replace";
+    }
   | { type: "CLEAR_LIBRARY" }
   | { type: "GET_CACHED_FOLDERS" }
   | { type: "CACHE_FOLDERS"; folders: Folder[] }
   | { type: "PING_CONTENT" }
   | { type: "START_IMPORT" }
   | { type: "IMPORT_PROGRESS"; captured: number; done?: boolean; error?: string }
-  // Optional cloud sync (kept for PWA later; not required for desktop)
   | { type: "GET_SESSION" }
-  | { type: "SIGN_IN"; email: string }
-  | { type: "SIGN_OUT" };
+  | { type: "CLOUD_REQUEST_OTP"; email: string }
+  | { type: "CLOUD_VERIFY_OTP"; userId: string; secret: string; email: string }
+  | { type: "SIGN_OUT" }
+  | { type: "SYNC_NOW" };
 
 export type ExtensionResponse =
   | { ok: true; data?: unknown }

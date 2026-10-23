@@ -13,6 +13,7 @@ import {
 import { sendMessage, showToast } from "./messaging";
 import {
   ensureBookmarksHook,
+  ensureNavItem,
   isForeignPrimaryNavLink,
   isXBookmarksRoute,
   setNavActive,
@@ -41,6 +42,7 @@ export default defineContentScript({
       navScheduled = true;
       window.setTimeout(() => {
         navScheduled = false;
+        ensureNavItem(() => void openLibraryView());
         ensureBookmarksHook(() => void openLibraryView());
         if (isLibraryOpen()) {
           if (!document.getElementById("xbookmarks-library-view")) {
@@ -119,6 +121,7 @@ export default defineContentScript({
     });
 
     function bootNavAndRoute() {
+      ensureNavItem(() => void openLibraryView());
       ensureBookmarksHook(() => void openLibraryView());
       if (isXBookmarksRoute()) {
         void syncLibraryRoute();

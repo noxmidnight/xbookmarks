@@ -255,7 +255,39 @@ export async function localImportLibrary(
 }
 
 export async function localClearLibrary(): Promise<void> {
-  await writeLibrary(emptyLibrary());
+  await browser.storage.local.remove(LIBRARY_KEY);
+}
+
+/** After a cloud upsert, align local row id with Appwrite `$id`. */
+export async function localReplaceBookmarkId(
+  oldId: string,
+  newId: string,
+): Promise<void> {
+  if (oldId === newId) return;
+  const lib = await readLibrary();
+  const bookmark = lib.bookmarks.find((b) => b.id === oldId);
+  if (!bookmark) return;
+  bookmark.id = newId;
+  bookmark.updated_at = nowIso();
+  await writeLibrary(lib);
+}
+
+export async function localReplaceFolderId(
+  oldId: string,
+  newId: string,
+): Promise<void> {
+  if (oldId === newId) return;
+  const lib = await readLibrary();
+  const folder = lib.folders.find((f) => f.id === oldId);
+  if (!folder) return;
+  folder.id = newId;
+  folder.updated_at = nowIso();
+  for (const bookmark of lib.bookmarks) {
+    bookmark.folder_ids = bookmark.folder_ids.map((id) =>
+      id === oldId ? newId : id,
+    );
+  }
+  await writeLibrary(lib);
 }
 
 export { LIBRARY_KEY };

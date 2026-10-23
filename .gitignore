@@ -1,5 +1,7 @@
 node_modules
-dist
+dist/extension
+dist/android
+apps/web/dist
 .output
 .wxt
 *.local
@@ -12,21 +14,20 @@ dist
 *.tsbuildinfo
 .turbo
 apps/extension/.output
-XBookmarks-Brave
+apps/extension/.wxt
 xbookmarks-pwa-dist.tar.gz
 apps/web/android/.gradle
 apps/web/android/app/build
 apps/web/android/build
 apps/web/android/local.properties
+apps/web/android/captures
 *.apk
 *.aab
 emulator-*.png
-apps/web/android/app/build
-apps/web/android/build
-apps/web/android/.gradle
-apps/web/android/local.properties
-apps/web/android/captures
-apps/extension/.wxt
 .idea
 .vscode
 .cursor/
+
+# Legacy root dumps (do not reintroduce)
+/XBookmarks-Brave/
+/XBookmarks.apk

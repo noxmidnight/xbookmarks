@@ -6,37 +6,90 @@ import {
   ToolBarType,
 } from "@capgo/capacitor-inappbrowser";
 import { extractTweetIdFromUrl } from "@xbookmarks/shared";
+import {
+  AD_BLOCKED_HOSTS,
+  AD_KILL_PRESHOW_SCRIPT,
+  AD_OUTBOUND_CANCEL_RULES,
+} from "./feedAdBlock";
+import { measureSafeAreaBottom, TAB_BAR_PX } from "./safeArea";
 
 export const X_FEED_URL = "https://x.com/home";
-/** Bottom tab bar + feed action strip (must stay above the native WebView). */
-export const FEED_BOTTOM_RESERVE_PX = 140;
 
 /** Chrome Android UA — X often rejects the default WebView user-agent. */
 const CHROME_MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
-const URL_HOOK_SCRIPT = `
+/**
+ * SPA URL tracking + hide first-party Promoted cards (DOM only).
+ * Third-party ad JS is cancelled natively via blockedHosts / outboundProxyRules
+ * and the documentStart preShowScript — not merely hidden.
+ */
+const FEED_PAGE_SCRIPT = `
 (function () {
-  if (window.__xbookmarksUrlHook) return;
-  window.__xbookmarksUrlHook = true;
-  function notify() {
-    try {
-      if (window.mobileApp && window.mobileApp.postMessage) {
-        window.mobileApp.postMessage({ type: "xbookmarks-url", url: location.href });
+  if (!window.__xbookmarksUrlHook) {
+    window.__xbookmarksUrlHook = true;
+    function notify() {
+      try {
+        if (window.mobileApp && window.mobileApp.postMessage) {
+          window.mobileApp.postMessage({ type: "xbookmarks-url", url: location.href });
+        }
+      } catch (e) {}
+    }
+    function wrap(fn) {
+      return function () {
+        var ret = fn.apply(this, arguments);
+        notify();
+        return ret;
+      };
+    }
+    history.pushState = wrap(history.pushState);
+    history.replaceState = wrap(history.replaceState);
+    window.addEventListener("popstate", notify);
+    notify();
+  }
+
+  if (window.__xbookmarksAdHide) return;
+  window.__xbookmarksAdHide = true;
+
+  var STYLE_ID = "xbookmarks-hide-ads";
+  function injectCss() {
+    if (document.getElementById(STYLE_ID)) return;
+    var s = document.createElement("style");
+    s.id = STYLE_ID;
+    s.textContent = [
+      'div[data-testid="placementTracking"] { display: none !important; }',
+      '[data-testid="cellInnerDiv"]:has([data-testid="placementTracking"]) { display: none !important; }',
+      'aside[aria-label*="Timeline: Trending"], div[data-testid="sidebarColumn"] [data-testid="placementTracking"] { display: none !important; }'
+    ].join("\\n");
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  function hidePromoted() {
+    injectCss();
+    document.querySelectorAll("article").forEach(function (article) {
+      if (article.querySelector('[data-testid="placementTracking"]')) {
+        var cell = article.closest('[data-testid="cellInnerDiv"]') || article;
+        cell.style.setProperty("display", "none", "important");
+        return;
       }
-    } catch (e) {}
+      var spans = article.querySelectorAll("span");
+      for (var i = 0; i < spans.length; i++) {
+        var t = (spans[i].textContent || "").trim();
+        if (t === "Promoted" || t === "Ad" || t.indexOf("Promoted by") === 0) {
+          var cell2 = article.closest('[data-testid="cellInnerDiv"]') || article;
+          cell2.style.setProperty("display", "none", "important");
+          return;
+        }
+      }
+    });
   }
-  function wrap(fn) {
-    return function () {
-      var ret = fn.apply(this, arguments);
-      notify();
-      return ret;
-    };
-  }
-  history.pushState = wrap(history.pushState);
-  history.replaceState = wrap(history.replaceState);
-  window.addEventListener("popstate", notify);
-  notify();
+
+  injectCss();
+  hidePromoted();
+  var mo = new MutationObserver(function () {
+    hidePromoted();
+  });
+  mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
 `;
 
@@ -79,8 +132,13 @@ export function setFeedRouteActive(active: boolean): void {
   feedRouteActive = active;
 }
 
+/** Space reserved under the X WebView: tab bar + Android/iOS home indicator. */
+export function feedBottomReservePx(): number {
+  return TAB_BAR_PX + measureSafeAreaBottom();
+}
+
 function feedHeight(): number {
-  return Math.max(240, Math.floor(window.innerHeight - FEED_BOTTOM_RESERVE_PX));
+  return Math.max(240, Math.floor(window.innerHeight - feedBottomReservePx()));
 }
 
 function applyUrl(url: string): void {
@@ -127,12 +185,11 @@ async function attachListeners(): Promise<void> {
   );
   listeners.push(
     await InAppBrowser.addListener("browserPageLoaded", () => {
-      void injectUrlHook();
+      void injectFeedScripts();
     }),
   );
   listeners.push(
     await InAppBrowser.addListener("closeEvent", () => {
-      // Should not happen with blank toolbar; recover cleanly if it does.
       opened = false;
       browserId = null;
     }),
@@ -144,12 +201,12 @@ async function attachListeners(): Promise<void> {
   );
 }
 
-async function injectUrlHook(): Promise<void> {
+async function injectFeedScripts(): Promise<void> {
   if (!browserId) return;
   try {
     await InAppBrowser.executeScript({
       id: browserId,
-      code: URL_HOOK_SCRIPT,
+      code: FEED_PAGE_SCRIPT,
     });
   } catch {
     // page may block injection briefly
@@ -242,12 +299,13 @@ export async function openXFeed(options: {
       if (feedRouteActive && !uiSuspended) {
         await InAppBrowser.show({ id: browserId });
         await resizeFeed();
-        await injectUrlHook();
+        await injectFeedScripts();
       }
       return;
     }
 
-    // Blank toolbar = no close (X) button. Bookmark lives in our app strip.
+    // Blank toolbar = no close (X) button. Bookmark lives in the app tab bar.
+    // Ad/tracker scripts are cancelled at the native network layer (never run).
     const { id } = await InAppBrowser.openWebView({
       url: currentUrl && currentUrl !== "about:blank" ? currentUrl : X_FEED_URL,
       height: feedHeight(),
@@ -263,6 +321,11 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
+      blockedHosts: AD_BLOCKED_HOSTS,
+      outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,
+      isPresentAfterPageLoad: true,
+      preShowScript: AD_KILL_PRESHOW_SCRIPT,
+      preShowScriptInjectionTime: "documentStart",
     });
 
     browserId = id;
@@ -272,7 +335,7 @@ export async function openXFeed(options: {
       await InAppBrowser.hide({ id: browserId });
     } else {
       await resizeFeed();
-      await injectUrlHook();
+      await injectFeedScripts();
     }
   })().finally(() => {
     opening = null;
@@ -293,7 +356,6 @@ export async function hideXFeed(): Promise<void> {
 export async function showXFeed(): Promise<void> {
   if (!isNativeApp() || uiSuspended) return;
 
-  // If the WebView was destroyed (old close X), recreate on next Feed visit.
   if (!browserId || !opened) {
     if (onUrlChangeCb && onSaveRequestCb) {
       await openXFeed({
@@ -308,7 +370,6 @@ export async function showXFeed(): Promise<void> {
     await InAppBrowser.show({ id: browserId });
     await resizeFeed();
   } catch {
-    // WebView gone — force recreate next open
     opened = false;
     browserId = null;
     if (onUrlChangeCb && onSaveRequestCb) {
@@ -349,7 +410,6 @@ export async function openUrlInFeed(url: string): Promise<void> {
     }
   }
 
-  // WebView not ready yet — FeedPage openXFeed() will load currentUrl.
   if (onUrlChangeCb && onSaveRequestCb) {
     await openXFeed({
       onUrlChange: onUrlChangeCb,
@@ -380,3 +440,6 @@ export function bindFeedResizeListener(): () => void {
   window.addEventListener("resize", onResize);
   return () => window.removeEventListener("resize", onResize);
 }
+
+/** @deprecated Use feedBottomReservePx() — kept for any leftover imports. */
+export const FEED_BOTTOM_RESERVE_PX = TAB_BAR_PX;

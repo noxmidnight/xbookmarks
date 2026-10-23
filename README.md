@@ -2,18 +2,20 @@
 
 Premium-style **bookmark folders** for X — without X Premium.
 
-- **Desktop (default):** Browser extension saves folders + bookmarks **locally** (`chrome.storage.local`). No account required.
-- **Phone (optional):** PWA synced via **Appwrite** Cloud.
-
 ```
 XBookmarks/
-  apps/web          PWA (Appwrite auth + DB)
-  apps/extension    Browser extension — local-first
-  packages/shared   Shared types + Appwrite API helpers
+  apps/extension    Browser extension (Brave / Chrome)
+  apps/web          Phone PWA + Capacitor Android app
+  packages/shared   Shared types + Appwrite API
   appwrite/         Cloud setup notes
+  dist/
+    extension/      ← load unpacked in Brave
+    android/        ← XBookmarks.apk
 ```
 
-## Desktop — local only
+Source for the two products stays separate under `apps/`. Installable builds land in **`dist/extension`** and **`dist/android`** only (nothing dumped at the repo root).
+
+## Desktop — browser extension
 
 ```bash
 pnpm install
@@ -22,38 +24,34 @@ pnpm build:ext
 
 Load unpacked in Brave from:
 
-- `~/Downloads/XBookmarks-Brave`, or
-- `/home/nox/Code/XBookmarks/XBookmarks-Brave`
+- `dist/extension`, or
+- `~/Downloads/XBookmarks/extension`
 
-Reload `x.com` → use X normally. Open **Bookmarks** in the left nav for folders. Bookmark any post → pick a folder.
+Reload `x.com` → gold **XBookmarks** in the left nav. Open the popup → sign in with the same Appwrite email as the phone → folders sync from the cloud.
 
-## Phone — Android app (recommended)
+## Phone — Android app
 
-Single app: **Feed** (x.com) + **Folders**. No Share-sheet hopping.
+```bash
+pnpm build:android
+```
 
-1. Download the latest **APK** from [Releases](https://github.com/noxmidnight/xbookmarks/releases) (allow unknown sources).
-2. Sign in with email **OTP** (6-digit code).
-3. **Feed** → open a tweet → **Bookmark** → pick folder.
-4. In **Folders** / **All**, **Open** loads the post in the Feed tab (not an external browser).
+Install:
 
-Full steps: [apps/web/ANDROID.md](apps/web/ANDROID.md)
+- `dist/android/XBookmarks.apk`, or
+- `~/Downloads/XBookmarks/android/XBookmarks.apk`
 
-Rebuild: `pnpm build:android`
+Or from [GitHub Releases](https://github.com/noxmidnight/xbookmarks/releases). Full steps: [apps/web/ANDROID.md](apps/web/ANDROID.md).
 
 ## Phone PWA (optional)
 
-Live: **https://xbookmarks.appwrite.network**
-
-- Magic-link sign-in locked to the owner email
-- Share from X → XBookmarks to save with text + media
-- Details: [appwrite/SETUP.md](appwrite/SETUP.md)
+Live: **https://xbookmarks.appwrite.network** — see [appwrite/SETUP.md](appwrite/SETUP.md).
 
 ## Scripts
 
 | Command | Description |
 |---|---|
-| `pnpm build:ext` | Build extension (+ copies to Brave folders) |
-| `pnpm build:android` | Build Capacitor debug APK |
+| `pnpm build:ext` | Build extension → `dist/extension` |
+| `pnpm build:android` | Build APK → `dist/android` |
 | `pnpm dev:ext` | Extension watch |
 | `pnpm dev:web` | PWA (needs Appwrite env) |
 | `pnpm typecheck` | Typecheck |

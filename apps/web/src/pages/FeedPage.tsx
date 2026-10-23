@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Typography from "@mui/material/Typography";
 import { SaveTweetDialog } from "../components/SaveTweetDialog";
 import {
+  clearFeedChromeState,
+  setFeedChromeState,
+} from "../lib/feedUi";
+import {
   bindFeedResizeListener,
-  FEED_BOTTOM_RESERVE_PX,
+  feedBottomReservePx,
   hideXFeed,
   isNativeApp,
   openXFeed,
@@ -30,7 +31,6 @@ export function FeedPage() {
   const [pickerPermalink, setPickerPermalink] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [feedError, setFeedError] = useState<string | null>(null);
-  const [resolving, setResolving] = useState(false);
 
   const tweetId = tweetIdFromFeedUrl(feedUrl);
 
@@ -49,14 +49,25 @@ export function FeedPage() {
   }, []);
 
   const onBookmark = useCallback(async () => {
-    setResolving(true);
+    setFeedChromeState({ busy: true });
     try {
       const url = await readLiveFeedUrl();
       openPickerForUrl(url);
     } finally {
-      setResolving(false);
+      setFeedChromeState({ busy: false });
     }
   }, [openPickerForUrl]);
+
+  useEffect(() => {
+    if (!native) return;
+    setFeedChromeState({
+      canBookmark: Boolean(tweetId),
+      onBookmark: () => {
+        void onBookmark();
+      },
+    });
+    return () => clearFeedChromeState();
+  }, [native, tweetId, onBookmark]);
 
   useEffect(() => {
     if (!native) return;
@@ -86,6 +97,7 @@ export function FeedPage() {
     return () => {
       cancelled = true;
       unbindResize();
+      clearFeedChromeState();
       // Do NOT hide/close here — Shell owns tab visibility so X login survives
       // switching away from Feed and back.
     };
@@ -142,51 +154,10 @@ export function FeedPage() {
     <>
       <Box
         sx={{
-          minHeight: `calc(100dvh - ${FEED_BOTTOM_RESERVE_PX}px)`,
+          minHeight: `calc(100dvh - ${feedBottomReservePx()}px)`,
           bgcolor: "transparent",
         }}
       />
-
-      <Paper
-        elevation={0}
-        sx={{
-          position: "fixed",
-          left: 0,
-          right: 0,
-          bottom: "calc(56px + env(safe-area-inset-bottom, 0px))",
-          zIndex: 11,
-          px: 1.5,
-          py: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-          borderRadius: 0,
-          borderLeft: "none",
-          borderRight: "none",
-          borderBottom: "none",
-          bgcolor: "background.paper",
-        }}
-      >
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ flex: 1, minWidth: 0 }}
-          noWrap
-        >
-          {tweetId
-            ? "Tweet open — save to a folder"
-            : "Open a tweet, then tap Bookmark"}
-        </Typography>
-        <Button
-          size="small"
-          variant="contained"
-          startIcon={<BookmarkAddIcon />}
-          disabled={resolving}
-          onClick={() => void onBookmark()}
-        >
-          {resolving ? "…" : "Bookmark"}
-        </Button>
-      </Paper>
 
       {feedError ? (
         <Alert

@@ -9,14 +9,14 @@ body,
 .app-shell {
   max-width: 640px;
   margin: 0 auto;
-  padding: 0 12px 88px;
+  padding: 0 12px calc(56px + env(safe-area-inset-bottom, 0px) + 24px);
   min-height: 100dvh;
   box-sizing: border-box;
 }
 
 .app-shell--feed {
   max-width: none;
-  padding: 0 0 132px;
+  padding: 0 0 calc(56px + env(safe-area-inset-bottom, 0px));
   background: transparent;
 }
 

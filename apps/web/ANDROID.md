@@ -8,7 +8,7 @@ Personal sideload APK: in-app **X feed** + **Folders** without Share-sheet switc
 https://github.com/noxmidnight/xbookmarks/releases/latest  
 → **XBookmarks.apk** → allow **Install unknown apps** if prompted → Install.
 
-Or copy `~/Downloads/XBookmarks.apk` via USB / Nearby Share / Drive.
+Or copy `dist/android/XBookmarks.apk` (also mirrored to `~/Downloads/XBookmarks/android/`) via USB / Nearby Share / Drive.
 3. Open **XBookmarks**.
 4. Sign in with your owner email → **Email me a code** → enter the 6-digit code from email.
 5. Tap **Feed** → log into X once inside the in-app browser.
@@ -22,7 +22,7 @@ Or copy `~/Downloads/XBookmarks.apk` via USB / Nearby Share / Drive.
 3. On the PC:
 
 ```bash
-adb install -r ~/Downloads/XBookmarks.apk
+adb install -r dist/android/XBookmarks.apk
 ```
 
 ## Rebuild after code changes
@@ -31,8 +31,8 @@ adb install -r ~/Downloads/XBookmarks.apk
 export JAVA_HOME="$HOME/.local/jdk-21"
 export ANDROID_HOME="$HOME/Android/Sdk"
 pnpm build:android
-# APK: apps/web/android/app/build/outputs/apk/debug/app-debug.apk
-cp apps/web/android/app/build/outputs/apk/debug/app-debug.apk ~/Downloads/XBookmarks.apk
+# → dist/android/XBookmarks.apk
+# → ~/Downloads/XBookmarks/android/XBookmarks.apk
 ```
 
 Requires JDK 21 at `~/.local/jdk-21` and Android SDK at `~/Android/Sdk` (already set up on this machine).
