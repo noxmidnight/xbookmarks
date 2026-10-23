@@ -4,8 +4,11 @@ Personal sideload APK: in-app **X feed** + **Folders** without Share-sheet switc
 
 ## Install on your phone
 
-1. Copy `~/Downloads/XBookmarks.apk` to the phone (USB, Nearby Share, Drive, etc.).
-2. On Android: open the APK → allow **Install unknown apps** for that source if prompted → Install.
+**Easiest:** download from GitHub Releases  
+https://github.com/noxmidnight/xbookmarks/releases/latest  
+→ **XBookmarks.apk** → allow **Install unknown apps** if prompted → Install.
+
+Or copy `~/Downloads/XBookmarks.apk` via USB / Nearby Share / Drive.
 3. Open **XBookmarks**.
 4. Sign in with your owner email → **Email me a code** → enter the 6-digit code from email.
 5. Tap **Feed** → log into X once inside the in-app browser.
