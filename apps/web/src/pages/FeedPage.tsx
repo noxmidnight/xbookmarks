@@ -11,7 +11,6 @@ import {
   clearFeedChromeState,
   setFeedChromeState,
 } from "../lib/feedUi";
-import { openXGoogleLoginInBrave } from "../lib/xGoogleLogin";
 import {
   bindFeedResizeListener,
   feedBottomReservePx,
@@ -89,13 +88,7 @@ export function FeedPage() {
             if (!cancelled) openPickerForUrl(url);
           },
           onAuthHint: (message) => {
-            if (cancelled) return;
-            if (message === "GOOGLE_BRAVE_FLOW") {
-              setGoogleHelp(true);
-              setToast("Continue Google sign-in in Brave…");
-              return;
-            }
-            setToast(message);
+            if (!cancelled) setToast(message);
           },
         });
       } catch (err) {
@@ -182,7 +175,7 @@ export function FeedPage() {
           bgcolor: "background.paper",
         }}
       >
-        Google login help
+        Login help
       </Button>
 
       {feedError ? (
@@ -212,24 +205,10 @@ export function FeedPage() {
 
       <Snackbar
         open={Boolean(toast)}
-        autoHideDuration={4000}
+        autoHideDuration={3000}
         onClose={() => setToast(null)}
         message={toast}
         anchorOrigin={{ vertical: "top", horizontal: "center" }}
-        action={
-          toast?.includes("Brave") ? (
-            <Button
-              color="inherit"
-              size="small"
-              onClick={() => {
-                setToast(null);
-                void openXGoogleLoginInBrave();
-              }}
-            >
-              Open
-            </Button>
-          ) : undefined
-        }
       />
     </>
   );

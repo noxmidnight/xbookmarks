@@ -80,14 +80,11 @@ export function SettingsPage() {
           <Card>
             <CardContent>
               <Stack spacing={1.5}>
-                <Typography sx={{ fontWeight: 700 }}>
-                  X login (Google-only accounts)
-                </Typography>
+                <Typography sx={{ fontWeight: 700 }}>X Feed login</Typography>
                 <Typography color="text.secondary" variant="body2">
-                  If you can only sign into X with Google: Android blocks that
-                  inside the app. Sign in with Google in <strong>Brave</strong>,
-                  set an <strong>X password</strong> once, then use{" "}
-                  <strong>@username + password</strong> in the Feed.
+                  Try <strong>Sign in with Google</strong> in the Feed first.
+                  If Google still fails, use Brave (below), set an X password
+                  once, then sign in with @username + password in the Feed.
                 </Typography>
                 <Typography color="text.secondary" variant="body2">
                   Brave:{" "}

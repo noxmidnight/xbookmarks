@@ -12,10 +12,8 @@ import {
   AD_OUTBOUND_CANCEL_RULES,
 } from "./feedAdBlock";
 import { measureSafeAreaBottom, TAB_BAR_PX } from "./safeArea";
-import { openXGoogleLoginInBrave } from "./xGoogleLogin";
 
 export const X_FEED_URL = "https://x.com/home";
-/** Username/password login — Google Sign-In is blocked inside Android WebViews. */
 export const X_LOGIN_URL =
   "https://x.com/i/flow/login?redirect_after_login=%2Fhome";
 
@@ -28,10 +26,10 @@ export type FeedUrlHandler = (url: string) => void;
 export type FeedSaveHandler = (url: string) => void;
 
 let onAuthHintCb: FeedAuthHintHandler | null = null;
-let googleAuthHandled = false;
 
 /**
- * SPA URL tracking + block Google window.open + hide Promoted cards.
+ * SPA URL tracking + hide Promoted cards.
+ * Do NOT intercept Google window.open — that broke Sign-In with Google.
  */
 const FEED_PAGE_SCRIPT = `
 (function () {
@@ -55,22 +53,10 @@ const FEED_PAGE_SCRIPT = `
     history.replaceState = wrap(history.replaceState);
     window.addEventListener("popstate", notify);
     notify();
-
-    var origOpen = window.open;
-    window.open = function (url) {
-      var s = url == null ? "" : String(url);
-      if (/accounts\\.google|myaccount\\.google|google\\.[^"'\\s]+\\/(gsi|o\\/oauth2|signin|accounts)/i.test(s)) {
-        try {
-          window.mobileApp.postMessage({ type: "xbookmarks-block-google", url: s });
-        } catch (e) {}
-        return null;
-      }
-      return origOpen.apply(this, arguments);
-    };
   }
 
-  if (window.__xbookmarksAdHide) return;
-  window.__xbookmarksAdHide = true;
+  if (window.__xbookmarksAdHideCss) return;
+  window.__xbookmarksAdHideCss = true;
 
   var STYLE_ID = "xbookmarks-hide-ads";
   function injectCss() {
@@ -79,8 +65,7 @@ const FEED_PAGE_SCRIPT = `
     s.id = STYLE_ID;
     s.textContent = [
       'div[data-testid="placementTracking"] { display: none !important; }',
-      '[data-testid="cellInnerDiv"]:has([data-testid="placementTracking"]) { display: none !important; }',
-      'aside[aria-label*="Timeline: Trending"], div[data-testid="sidebarColumn"] [data-testid="placementTracking"] { display: none !important; }'
+      '[data-testid="cellInnerDiv"]:has([data-testid="placementTracking"]) { display: none !important; }'
     ].join("\\n");
     (document.head || document.documentElement).appendChild(s);
   }
@@ -96,7 +81,7 @@ const FEED_PAGE_SCRIPT = `
       var spans = article.querySelectorAll("span");
       for (var i = 0; i < spans.length; i++) {
         var t = (spans[i].textContent || "").trim();
-        if (t === "Promoted" || t === "Ad" || t.indexOf("Promoted by") === 0) {
+        if (t === "Promoted" || t.indexOf("Promoted by") === 0) {
           var cell2 = article.closest('[data-testid="cellInnerDiv"]') || article;
           cell2.style.setProperty("display", "none", "important");
           return;
@@ -107,23 +92,21 @@ const FEED_PAGE_SCRIPT = `
 
   injectCss();
   hidePromoted();
-  var mo = new MutationObserver(function () {
-    hidePromoted();
+  new MutationObserver(hidePromoted).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
   });
-  mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
 `;
 
 let browserId: string | null = null;
-/** GSI / window.open popups — must be closed on tab switch or they cover the whole app. */
+/** Popups (incl. Google GSI) — close on tab switch so they don't cover Folders/etc. */
 const popupIds = new Set<string>();
 let currentUrl = X_FEED_URL;
 let listeners: PluginListenerHandle[] = [];
 let opened = false;
 let opening: Promise<void> | null = null;
-/** When true, Shell must not call showXFeed (folder picker is open). */
 let uiSuspended = false;
-/** Host route wants the feed visible (Feed tab active). */
 let feedRouteActive = false;
 let onUrlChangeCb: FeedUrlHandler | null = null;
 let onSaveRequestCb: FeedSaveHandler | null = null;
@@ -152,7 +135,6 @@ export function setFeedRouteActive(active: boolean): void {
   feedRouteActive = active;
 }
 
-/** Space reserved under the X WebView: tab bar + Android/iOS home indicator. */
 export function feedBottomReservePx(): number {
   return TAB_BAR_PX + measureSafeAreaBottom();
 }
@@ -165,29 +147,11 @@ export function isGoogleAuthUrl(url: string): boolean {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
-    const path = `${u.pathname}${u.search}`;
-    if (
+    return (
       host === "accounts.google.com" ||
       host.endsWith(".accounts.google.com") ||
-      host === "myaccount.google.com" ||
-      host.endsWith(".myaccount.google.com") ||
-      host === "accounts.youtube.com" ||
-      host === "oauthaccountmanager.googleapis.com"
-    ) {
-      return true;
-    }
-    if (host === "google.com" || host === "www.google.com") {
-      return /\/(accounts|signin|oauth|AccountChooser|ServiceLogin|v3\/signin|gsi)\b/i.test(
-        path,
-      );
-    }
-    if (
-      host.includes("google.") &&
-      /\/(gsi|o\/oauth2|signin|accounts|AccountChooser)\b/i.test(path)
-    ) {
-      return true;
-    }
-    return false;
+      host.includes("google.") && /\/(gsi|o\/oauth2|signin)\b/i.test(u.pathname)
+    );
   } catch {
     return false;
   }
@@ -207,69 +171,11 @@ async function closeAllPopups(): Promise<void> {
   );
 }
 
-async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
-  // Always dismiss Google popups / surfaces — never leave them covering the app.
-  if (sourceId && sourceId !== browserId) {
-    popupIds.delete(sourceId);
-    try {
-      await InAppBrowser.close({ id: sourceId });
-    } catch {
-      // ignore
-    }
-  }
-  await closeAllPopups();
-
-  // Hide Feed WebView while Brave handles Google (WebView cannot complete Google OAuth).
-  if (browserId) {
-    try {
-      await InAppBrowser.hide({ id: browserId });
-    } catch {
-      // ignore
-    }
-  }
-
-  if (!googleAuthHandled) {
-    googleAuthHandled = true;
-    onAuthHintCb?.(
-      "GOOGLE_BRAVE_FLOW",
-    );
-  }
-
-  // Real Google Sign-In for X-only-via-Google accounts.
-  await openXGoogleLoginInBrave();
-
-  // Keep WebView on X login (username/password after they set one in Brave).
-  if (!browserId) return;
-  try {
-    await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
-    currentUrl = X_LOGIN_URL;
-    onUrlChangeCb?.(X_LOGIN_URL);
-  } catch {
-    try {
-      await InAppBrowser.executeScript({
-        id: browserId,
-        code: `location.replace(${JSON.stringify(X_LOGIN_URL)});`,
-      });
-    } catch {
-      // ignore
-    }
-  }
-}
-
 function applyUrl(url: string, sourceId?: string): void {
   if (!url) return;
   if (url !== currentUrl && (!sourceId || sourceId === browserId)) {
     currentUrl = url;
     onUrlChangeCb?.(url);
-  }
-
-  if (isGoogleAuthUrl(url)) {
-    void bounceAwayFromGoogle(sourceId);
-    return;
-  }
-
-  if (url.includes("x.com") || url.includes("twitter.com")) {
-    googleAuthHandled = false;
   }
 }
 
@@ -307,35 +213,20 @@ async function attachListeners(): Promise<void> {
       if (payload?.type === "xbookmarks-url" && payload.url) {
         applyUrl(payload.url, browserId ?? undefined);
       }
-      if (payload?.type === "xbookmarks-block-google") {
-        void bounceAwayFromGoogle();
-      }
     }),
   );
   listeners.push(
-    await InAppBrowser.addListener("browserPageLoaded", (event) => {
-      const url =
-        event && typeof event === "object" && "url" in event
-          ? String((event as { url?: string }).url || "")
-          : currentUrl;
-      if (isGoogleAuthUrl(url) || isGoogleAuthUrl(currentUrl)) {
-        void bounceAwayFromGoogle(browserId ?? undefined);
-        return;
-      }
+    await InAppBrowser.addListener("browserPageLoaded", () => {
       void injectFeedScripts();
     }),
   );
   listeners.push(
     await InAppBrowser.addListener("popupWindowOpened", (event) => {
       popupIds.add(event.id);
-      const url = event.url || "";
-      if (isGoogleAuthUrl(url) || !url) {
-        // Google GSI popup (or unknown) — never leave it covering the app.
-        void bounceAwayFromGoogle(event.id);
-        return;
-      }
-      // Keep non-Google popups from covering other tabs: hide unless Feed is active.
-      if (!feedRouteActive || uiSuspended) {
+      // Allow Google / other popups while on Feed; show them (GSI needs a visible window).
+      if (feedRouteActive && !uiSuspended) {
+        void InAppBrowser.show({ id: event.id }).catch(() => undefined);
+      } else {
         void InAppBrowser.close({ id: event.id }).then(() => {
           popupIds.delete(event.id);
         });
@@ -363,13 +254,15 @@ async function attachListeners(): Promise<void> {
 
 async function injectFeedScripts(): Promise<void> {
   if (!browserId) return;
+  // Only inject into X pages — never into Google auth documents.
+  if (isGoogleAuthUrl(currentUrl)) return;
   try {
     await InAppBrowser.executeScript({
       id: browserId,
       code: FEED_PAGE_SCRIPT,
     });
   } catch {
-    // page may block injection briefly
+    // ignore
   }
 }
 
@@ -388,9 +281,6 @@ async function resizeFeed(): Promise<void> {
   }
 }
 
-/**
- * Ask the WebView for location.href (more reliable than last cached SPA URL).
- */
 export async function readLiveFeedUrl(): Promise<string> {
   if (!isNativeApp() || !browserId) return currentUrl;
 
@@ -481,12 +371,13 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
-      // No Google Pay / GSI popup support — Google Sign-In cannot work in WebView.
-      enableGooglePaySupport: false,
-      hiddenPopupWindow: true,
+      // Needed for X "Sign in with Google" GSI popup (postMessage back to x.com).
+      enableGooglePaySupport: true,
+      hiddenPopupWindow: false,
       blockedHosts: AD_BLOCKED_HOSTS,
       outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,
       isPresentAfterPageLoad: true,
+      // CSS-only ad hide on x.com — never runs on Google documents.
       preShowScript: AD_KILL_PRESHOW_SCRIPT,
       preShowScriptInjectionTime: "documentStart",
     });
@@ -509,7 +400,7 @@ export async function openXFeed(options: {
 
 export async function hideXFeed(): Promise<void> {
   if (!isNativeApp()) return;
-  // Popups (e.g. Google auth) sit above the app — always dismiss them on tab switch.
+  // Don't leave Google / other popups covering Folders / All / Settings.
   await closeAllPopups();
   if (!browserId) return;
   try {
@@ -521,9 +412,6 @@ export async function hideXFeed(): Promise<void> {
 
 export async function showXFeed(): Promise<void> {
   if (!isNativeApp() || uiSuspended) return;
-
-  // Never leave a stray popup on screen when returning to Feed.
-  await closeAllPopups();
 
   if (!browserId || !opened) {
     if (onUrlChangeCb && onSaveRequestCb) {
@@ -537,11 +425,6 @@ export async function showXFeed(): Promise<void> {
   }
 
   try {
-    // If we were stuck on Google, force username login.
-    if (isGoogleAuthUrl(currentUrl)) {
-      await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
-      currentUrl = X_LOGIN_URL;
-    }
     await InAppBrowser.show({ id: browserId });
     await resizeFeed();
   } catch {
@@ -557,9 +440,6 @@ export async function showXFeed(): Promise<void> {
   }
 }
 
-/**
- * Navigate the in-app X Feed WebView to a permalink (bookmark Open).
- */
 export async function openUrlInFeed(url: string): Promise<void> {
   if (!url) return;
   currentUrl = url;
@@ -610,15 +490,10 @@ export async function closeXFeed(): Promise<void> {
   opened = false;
   currentUrl = X_FEED_URL;
   uiSuspended = false;
-  googleAuthHandled = false;
 }
 
-/**
- * Clear X/Google cookies in the Feed WebView and open the username login page.
- */
 export async function resetFeedLogin(): Promise<void> {
   if (!isNativeApp()) return;
-  googleAuthHandled = false;
   await closeAllPopups();
   const urls = [
     "https://x.com",
@@ -674,5 +549,4 @@ export function bindFeedResizeListener(): () => void {
   return () => window.removeEventListener("resize", onResize);
 }
 
-/** @deprecated Use feedBottomReservePx() — kept for any leftover imports. */
 export const FEED_BOTTOM_RESERVE_PX = TAB_BAR_PX;
