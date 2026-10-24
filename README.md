@@ -52,6 +52,7 @@ Live: **https://xbookmarks.appwrite.network** — see [appwrite/SETUP.md](appwri
 |---|---|
 | `pnpm build:ext` | Build extension → `dist/extension` |
 | `pnpm build:android` | Build APK → `dist/android` |
+| `pnpm emu` | Start emulator, install APK, launch app |
 | `pnpm dev:ext` | Extension watch |
 | `pnpm dev:web` | PWA (needs Appwrite env) |
 | `pnpm typecheck` | Typecheck |

@@ -10,6 +10,7 @@
     "build:web": "pnpm --filter @xbookmarks/web build",
     "build:ext": "pnpm --filter @xbookmarks/extension build",
     "build:android": "pnpm --filter @xbookmarks/web android:build",
+    "emu": "bash ./scripts/run-emulator.sh",
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {

@@ -128,6 +128,10 @@ export const AD_OUTBOUND_CANCEL_RULES: NativeProxyRule[] = [
  */
 export const AD_KILL_PRESHOW_SCRIPT = `
 (function () {
+  // Never run on Google / non-X pages — hooks here break Google Sign-In.
+  var pageHost = (location && location.hostname) || "";
+  if (!/(^|\\.)(x|twitter)\\.com$/i.test(pageHost)) return;
+
   if (window.__xbookmarksAdKill) return;
   window.__xbookmarksAdKill = true;
 

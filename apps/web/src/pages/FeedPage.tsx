@@ -84,6 +84,9 @@ export function FeedPage() {
           onSaveRequest: (url) => {
             if (!cancelled) openPickerForUrl(url);
           },
+          onAuthHint: (message) => {
+            if (!cancelled) setToast(message);
+          },
         });
       } catch (err) {
         if (!cancelled) {

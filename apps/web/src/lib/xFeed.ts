@@ -14,10 +14,18 @@ import {
 import { measureSafeAreaBottom, TAB_BAR_PX } from "./safeArea";
 
 export const X_FEED_URL = "https://x.com/home";
+/** Username/password login — Google Sign-In is blocked inside Android WebViews. */
+export const X_LOGIN_URL =
+  "https://x.com/i/flow/login?redirect_after_login=%2Fhome";
 
 /** Chrome Android UA — X often rejects the default WebView user-agent. */
 const CHROME_MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+
+export type FeedAuthHintHandler = (message: string) => void;
+
+let onAuthHintCb: FeedAuthHintHandler | null = null;
+let googleAuthRedirected = false;
 
 /**
  * SPA URL tracking + hide first-party Promoted cards (DOM only).
@@ -141,10 +149,39 @@ function feedHeight(): number {
   return Math.max(240, Math.floor(window.innerHeight - feedBottomReservePx()));
 }
 
+export function isGoogleAuthUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host === "accounts.google.com" || host.endsWith(".accounts.google.com")) {
+      return true;
+    }
+    if (host.includes("google.") && /\/(gsi|o\/oauth2|signin)\b/i.test(u.pathname)) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function applyUrl(url: string): void {
   if (!url || url === currentUrl) return;
   currentUrl = url;
   onUrlChangeCb?.(url);
+
+  // Google blocks OAuth inside embedded WebViews ("clear Chrome cookies" interstitial).
+  // Bounce to X username login so the user can finish signing in.
+  if (isGoogleAuthUrl(url) && !googleAuthRedirected && browserId) {
+    googleAuthRedirected = true;
+    onAuthHintCb?.(
+      "Google sign-in is blocked inside apps. Use username & password (or Apple) on the X login screen.",
+    );
+    void InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL }).catch(() => undefined);
+  }
+  if (!isGoogleAuthUrl(url) && url.includes("x.com")) {
+    googleAuthRedirected = false;
+  }
 }
 
 function parseWebviewMessage(event: unknown): {
@@ -275,11 +312,13 @@ export async function readLiveFeedUrl(): Promise<string> {
 export async function openXFeed(options: {
   onUrlChange: FeedUrlHandler;
   onSaveRequest: FeedSaveHandler;
+  onAuthHint?: FeedAuthHintHandler;
 }): Promise<void> {
   if (!isNativeApp()) return;
 
   onUrlChangeCb = options.onUrlChange;
   onSaveRequestCb = options.onSaveRequest;
+  onAuthHintCb = options.onAuthHint ?? null;
   options.onUrlChange(currentUrl);
 
   if (opening) {
@@ -321,6 +360,9 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
+      // Needed so X "Sign in with Google" can open its GSI popup (postMessage back to x.com).
+      // Google still often blocks WebView OAuth — we then redirect to username login.
+      enableGooglePaySupport: true,
       blockedHosts: AD_BLOCKED_HOSTS,
       outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,
       isPresentAfterPageLoad: true,
@@ -361,6 +403,7 @@ export async function showXFeed(): Promise<void> {
       await openXFeed({
         onUrlChange: onUrlChangeCb,
         onSaveRequest: onSaveRequestCb,
+        onAuthHint: onAuthHintCb ?? undefined,
       });
     }
     return;
@@ -376,6 +419,7 @@ export async function showXFeed(): Promise<void> {
       await openXFeed({
         onUrlChange: onUrlChangeCb,
         onSaveRequest: onSaveRequestCb,
+        onAuthHint: onAuthHintCb ?? undefined,
       });
     }
   }
@@ -414,6 +458,7 @@ export async function openUrlInFeed(url: string): Promise<void> {
     await openXFeed({
       onUrlChange: onUrlChangeCb,
       onSaveRequest: onSaveRequestCb,
+      onAuthHint: onAuthHintCb ?? undefined,
     });
   }
 }
@@ -430,6 +475,59 @@ export async function closeXFeed(): Promise<void> {
   opened = false;
   currentUrl = X_FEED_URL;
   uiSuspended = false;
+  googleAuthRedirected = false;
+}
+
+/**
+ * Clear X/Google cookies in the Feed WebView and open the username login page.
+ * Does not wipe Appwrite session cookies for unrelated hosts when possible.
+ */
+export async function resetFeedLogin(): Promise<void> {
+  if (!isNativeApp()) return;
+  googleAuthRedirected = false;
+  const urls = [
+    "https://x.com",
+    "https://twitter.com",
+    "https://mobile.twitter.com",
+    "https://api.x.com",
+    "https://accounts.google.com",
+    "https://accounts.youtube.com",
+  ];
+  for (const url of urls) {
+    try {
+      await InAppBrowser.clearCookies({ url });
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    await InAppBrowser.clearCache();
+  } catch {
+    // ignore
+  }
+
+  currentUrl = X_LOGIN_URL;
+  feedRouteActive = true;
+  if (opened && browserId) {
+    try {
+      await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
+      if (!uiSuspended) {
+        await InAppBrowser.show({ id: browserId });
+        await resizeFeed();
+      }
+      return;
+    } catch {
+      opened = false;
+      browserId = null;
+    }
+  }
+  if (onUrlChangeCb && onSaveRequestCb) {
+    await openXFeed({
+      onUrlChange: onUrlChangeCb,
+      onSaveRequest: onSaveRequestCb,
+      onAuthHint: onAuthHintCb ?? undefined,
+    });
+  }
 }
 
 export function bindFeedResizeListener(): () => void {

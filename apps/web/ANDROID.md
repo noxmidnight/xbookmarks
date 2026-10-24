@@ -12,6 +12,8 @@ Or copy `dist/android/XBookmarks.apk` (also mirrored to `~/Downloads/XBookmarks/
 3. Open **XBookmarks**.
 4. Sign in with your owner email → **Email me a code** → enter the 6-digit code from email.
 5. Tap **Feed** → log into X once inside the in-app browser.
+   - Prefer **username & password** or **Apple** — Google Sign-In is blocked inside app WebViews (the “clear Chrome cookies” page). Clearing Chrome will not fix that.
+   - If stuck: **Settings → Reset Feed login**, then sign in with username/password.
 6. Open a tweet → tap **Bookmark** (strip under the feed, or the toolbar bookmark) → pick folder(s) → **Save**.
 7. Check **Folders** / **All** for the saved post.
 

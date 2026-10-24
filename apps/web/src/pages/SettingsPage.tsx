@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { OWNER_EMAIL } from "../lib/owner";
+import { isNativeApp, resetFeedLogin } from "../lib/xFeed";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -10,9 +12,12 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const { user, signOut, createExtensionJwt } = useAuth();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [feedBusy, setFeedBusy] = useState(false);
+  const [feedMsg, setFeedMsg] = useState<string | null>(null);
 
   async function copyJwtForExtension() {
     setCopyError(null);
@@ -59,6 +64,48 @@ export function SettingsPage() {
             </Stack>
           </CardContent>
         </Card>
+
+        {isNativeApp() ? (
+          <Card>
+            <CardContent>
+              <Stack spacing={1.5}>
+                <Typography sx={{ fontWeight: 700 }}>X Feed login</Typography>
+                <Typography color="text.secondary" variant="body2">
+                  Google blocks “Sign in with Google” inside apps (that “clear
+                  Chrome cookies” page). Use <strong>username &amp; password</strong>{" "}
+                  or <strong>Apple</strong> on X’s login screen instead. Clearing
+                  Chrome does not fix this.
+                </Typography>
+                <Button
+                  variant="contained"
+                  disabled={feedBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setFeedBusy(true);
+                      setFeedMsg(null);
+                      try {
+                        await resetFeedLogin();
+                        setFeedMsg("Feed cookies cleared — opening X login.");
+                        navigate("/feed");
+                      } catch (err) {
+                        setFeedMsg(
+                          err instanceof Error
+                            ? err.message
+                            : "Could not reset Feed login",
+                        );
+                      } finally {
+                        setFeedBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {feedBusy ? "Working…" : "Reset Feed login"}
+                </Button>
+                {feedMsg ? <Alert severity="info">{feedMsg}</Alert> : null}
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardContent>
