@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { isBraveInstalled, openInBrave } from "../lib/braveBrowser";
 import { OWNER_EMAIL } from "../lib/owner";
-import { isNativeApp, resetFeedLogin } from "../lib/xFeed";
+import { isNativeApp, resetFeedLogin, X_LOGIN_URL } from "../lib/xFeed";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -18,6 +19,12 @@ export function SettingsPage() {
   const [copyError, setCopyError] = useState<string | null>(null);
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedMsg, setFeedMsg] = useState<string | null>(null);
+  const [braveOk, setBraveOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    void isBraveInstalled().then(setBraveOk);
+  }, []);
 
   async function copyJwtForExtension() {
     setCopyError(null);
@@ -71,10 +78,17 @@ export function SettingsPage() {
               <Stack spacing={1.5}>
                 <Typography sx={{ fontWeight: 700 }}>X Feed login</Typography>
                 <Typography color="text.secondary" variant="body2">
-                  Google blocks “Sign in with Google” inside apps (that “clear
-                  Chrome cookies” page). Use <strong>username &amp; password</strong>{" "}
-                  or <strong>Apple</strong> on X’s login screen instead. Clearing
-                  Chrome does not fix this.
+                  The in-app Feed uses Android System WebView (not the Chrome or
+                  Brave apps). Google Sign-In is blocked there. External opens
+                  prefer <strong>Brave</strong> when it’s installed.
+                </Typography>
+                <Typography color="text.secondary" variant="body2">
+                  Brave:{" "}
+                  {braveOk === null
+                    ? "…"
+                    : braveOk
+                      ? "installed — preferred for external login"
+                      : "not installed — install Brave to use it for Google login"}
                 </Typography>
                 <Button
                   variant="contained"
@@ -84,8 +98,40 @@ export function SettingsPage() {
                       setFeedBusy(true);
                       setFeedMsg(null);
                       try {
+                        const result = await openInBrave(X_LOGIN_URL);
+                        setFeedMsg(
+                          result.brave
+                            ? "Opened X login in Brave."
+                            : result.opened
+                              ? "Opened X login in your system browser."
+                              : "Could not open a browser.",
+                        );
+                      } catch (err) {
+                        setFeedMsg(
+                          err instanceof Error
+                            ? err.message
+                            : "Could not open Brave",
+                        );
+                      } finally {
+                        setFeedBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  Open X login in Brave
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={feedBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setFeedBusy(true);
+                      setFeedMsg(null);
+                      try {
                         await resetFeedLogin();
-                        setFeedMsg("Feed cookies cleared — opening X login.");
+                        setFeedMsg(
+                          "Feed cookies cleared — use username & password in Feed.",
+                        );
                         navigate("/feed");
                       } catch (err) {
                         setFeedMsg(

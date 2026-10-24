@@ -162,6 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@capgo/capacitor-inappbrowser@8.25.1': cc4e09a450f3103922731f0953620acf6b7f6e5a22ee6ded4babf4c64a615da4
+
 importers:
 
   .:
@@ -217,7 +220,7 @@ importers:
         version: 8.0.4(@capacitor/core@8.5.3)
       '@capgo/capacitor-inappbrowser':
         specifier: ^8.25.1
-        version: 8.25.1(@capacitor/core@8.5.3)
+        version: 8.25.1(patch_hash=cc4e09a450f3103922731f0953620acf6b7f6e5a22ee6ded4babf4c64a615da4)(@capacitor/core@8.5.3)
       '@emotion/react':
         specifier: ^11.14.0
         version: 11.14.0(@types/react@19.3.0)(react@19.3.1)
@@ -4776,7 +4779,7 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.5.3
 
-  '@capgo/capacitor-inappbrowser@8.25.1(@capacitor/core@8.5.3)':
+  '@capgo/capacitor-inappbrowser@8.25.1(patch_hash=cc4e09a450f3103922731f0953620acf6b7f6e5a22ee6ded4babf4c64a615da4)(@capacitor/core@8.5.3)':
     dependencies:
       '@capacitor/core': 8.5.3
 

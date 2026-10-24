@@ -6,6 +6,7 @@ import {
   ToolBarType,
 } from "@capgo/capacitor-inappbrowser";
 import { extractTweetIdFromUrl } from "@xbookmarks/shared";
+import { openInBrave } from "./braveBrowser";
 import {
   AD_BLOCKED_HOSTS,
   AD_KILL_PRESHOW_SCRIPT,
@@ -203,9 +204,6 @@ async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
     return;
   }
   googleAuthHandled = true;
-  onAuthHintCb?.(
-    "Google sign-in can’t run inside the app. Use username & password (or Apple) on X.",
-  );
 
   if (sourceId && sourceId !== browserId) {
     popupIds.delete(sourceId);
@@ -217,6 +215,14 @@ async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
   }
 
   await closeAllPopups();
+
+  // Google works in a real browser. Prefer Brave Custom Tabs over Chrome.
+  const brave = await openInBrave(X_LOGIN_URL);
+  onAuthHintCb?.(
+    brave.brave
+      ? "Opened X login in Brave — use Google there if you want. In the app Feed, sign in with username & password (or Apple)."
+      : "Google can’t finish inside the app. Use username & password (or Apple) on X, or install Brave.",
+  );
 
   if (browserId) {
     try {

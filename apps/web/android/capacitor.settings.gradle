@@ -9,4 +9,4 @@ include ':capacitor-status-bar'
 project(':capacitor-status-bar').projectDir = new File('../../../node_modules/.pnpm/@capacitor+status-bar@8.0.4_@capacitor+core@8.5.3/node_modules/@capacitor/status-bar/android')
 
 include ':capgo-capacitor-inappbrowser'
-project(':capgo-capacitor-inappbrowser').projectDir = new File('../../../node_modules/.pnpm/@capgo+capacitor-inappbrowser@8.25.1_@capacitor+core@8.5.3/node_modules/@capgo/capacitor-inappbrowser/android')
+project(':capgo-capacitor-inappbrowser').projectDir = new File('../../../node_modules/.pnpm/@capgo+capacitor-inappbrowser@8.25.1_patch_hash=cc4e09a450f3103922731f0953620acf6b7f6e5_0e7d89284f861825824d518e4cbd35ab/node_modules/@capgo/capacitor-inappbrowser/android')

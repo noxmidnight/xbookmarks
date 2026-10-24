@@ -1,0 +1,85 @@
+diff --git a/android/src/main/java/ee/forgr/capacitor_inappbrowser/CapgoInAppBrowserPlugin.java b/android/src/main/java/ee/forgr/capacitor_inappbrowser/CapgoInAppBrowserPlugin.java
+index ee7c6da1dcadc407e71a12cca5da830da463d44a..6607dd9215d546d874f28b1ca5932ec33d5a8473 100644
+--- a/android/src/main/java/ee/forgr/capacitor_inappbrowser/CapgoInAppBrowserPlugin.java
++++ b/android/src/main/java/ee/forgr/capacitor_inappbrowser/CapgoInAppBrowserPlugin.java
+@@ -93,7 +93,16 @@ public class CapgoInAppBrowserPlugin extends Plugin implements WebViewDialog.Per
+         return "prompt".equalsIgnoreCase(mode);
+     }
+ 
+-    public static final String CUSTOM_TAB_PACKAGE_NAME = "com.android.chrome"; // Change when in stable
++    /** Prefer Brave over Chrome for Custom Tabs when installed. */
++    public static final String CUSTOM_TAB_PACKAGE_NAME = "com.brave.browser";
++    private static final String[] CUSTOM_TAB_PACKAGE_CANDIDATES = new String[] {
++        "com.brave.browser",
++        "com.brave.browser_beta",
++        "com.brave.browser_nightly",
++        "com.android.chrome",
++        "com.chrome.beta",
++        "com.chrome.dev",
++    };
+     private CustomTabsClient customTabsClient;
+     private CustomTabsSession currentSession;
+     private WebViewDialog webViewDialog = null;
+@@ -676,16 +685,19 @@ public class CapgoInAppBrowserPlugin extends Plugin implements WebViewDialog.Per
+     private final CustomTabsLifecycleSupport.Binder customTabsBinder = new CustomTabsLifecycleSupport.Binder() {
+         @Override
+         public boolean bindCustomTabsService() {
+-            try {
+-                boolean ok = CustomTabsClient.bindCustomTabsService(getContext(), CUSTOM_TAB_PACKAGE_NAME, connection);
+-                if (!ok) {
+-                    Log.e(getLogTag(), "Error binding to custom tabs service");
++            for (String pkg : CUSTOM_TAB_PACKAGE_CANDIDATES) {
++                try {
++                    boolean ok = CustomTabsClient.bindCustomTabsService(getContext(), pkg, connection);
++                    if (ok) {
++                        Log.d(getLogTag(), "Bound Custom Tabs service: " + pkg);
++                        return true;
++                    }
++                } catch (RuntimeException e) {
++                    Log.w(getLogTag(), "Custom Tabs bind failed for " + pkg, e);
+                 }
+-                return ok;
+-            } catch (RuntimeException e) {
+-                Log.e(getLogTag(), "Error binding to custom tabs service", e);
+-                return false;
+             }
++            Log.e(getLogTag(), "Error binding to custom tabs service (Brave/Chrome)");
++            return false;
+         }
+ 
+         @Override
+@@ -848,19 +860,25 @@ public class CapgoInAppBrowserPlugin extends Plugin implements WebViewDialog.Per
+         tabsIntent.intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse(Intent.URI_ANDROID_APP_SCHEME + "//" + getContext().getPackageName()));
+         tabsIntent.intent.putExtra(android.provider.Browser.EXTRA_HEADERS, this.getHeaders(call));
+ 
+-        if (preventDeeplink != false) {
+-            String browserPackageName = "";
++        // Prefer Brave for Custom Tabs launches; fall back to default browser / Chrome.
++        String preferredPackage = null;
++        for (String pkg : CUSTOM_TAB_PACKAGE_CANDIDATES) {
++            try {
++                getContext().getPackageManager().getPackageInfo(pkg, 0);
++                preferredPackage = pkg;
++                break;
++            } catch (PackageManager.NameNotFoundException ignored) {}
++        }
++        if (preferredPackage == null && preventDeeplink != false) {
+             Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("http://"));
+             ResolveInfo resolveInfo = getContext().getPackageManager().resolveActivity(browserIntent, PackageManager.MATCH_DEFAULT_ONLY);
+-
+-            if (resolveInfo != null) {
+-                browserPackageName = resolveInfo.activityInfo.packageName;
+-
+-                if (!browserPackageName.isEmpty()) {
+-                    tabsIntent.intent.setPackage(browserPackageName);
+-                }
++            if (resolveInfo != null && resolveInfo.activityInfo != null) {
++                preferredPackage = resolveInfo.activityInfo.packageName;
+             }
+         }
++        if (preferredPackage != null && !preferredPackage.isEmpty()) {
++            tabsIntent.intent.setPackage(preferredPackage);
++        }
+ 
+         if (isPresentAfterPageLoad) {
+             tabsIntent.intent.putExtra("isPresentAfterPageLoad", true);

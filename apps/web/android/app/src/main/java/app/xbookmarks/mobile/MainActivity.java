@@ -20,6 +20,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(BraveBrowserPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Keep system nav/status bars from drawing under our WebView chrome.

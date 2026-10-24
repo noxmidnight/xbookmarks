@@ -5,3 +5,6 @@ packages:
 allowBuilds:
   esbuild: true
   spawn-sync: true
+
+patchedDependencies:
+  '@capgo/capacitor-inappbrowser@8.25.1': patches/@capgo__capacitor-inappbrowser@8.25.1.patch
