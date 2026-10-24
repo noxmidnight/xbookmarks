@@ -11,7 +11,11 @@ import {
   AD_KILL_PRESHOW_SCRIPT,
   AD_OUTBOUND_CANCEL_RULES,
 } from "./feedAdBlock";
-import { measureSafeAreaBottom, TAB_BAR_PX } from "./safeArea";
+import {
+  measureSafeAreaBottom,
+  measureSafeAreaTop,
+  TAB_BAR_PX,
+} from "./safeArea";
 
 export const X_FEED_URL = "https://x.com/home";
 export const X_LOGIN_URL =
@@ -136,11 +140,21 @@ export function setFeedRouteActive(active: boolean): void {
 }
 
 export function feedBottomReservePx(): number {
-  return TAB_BAR_PX + measureSafeAreaBottom();
+  // Tab bar + home-indicator inset. Small buffer so the native WebView
+  // never covers the bookmark FAB sitting in the tab strip.
+  return TAB_BAR_PX + measureSafeAreaBottom() + 4;
+}
+
+function feedTopOffsetPx(): number {
+  // Capgo dialog is often edge-to-edge even when the host activity is not.
+  return measureSafeAreaTop();
 }
 
 function feedHeight(): number {
-  return Math.max(240, Math.floor(window.innerHeight - feedBottomReservePx()));
+  return Math.max(
+    240,
+    Math.floor(window.innerHeight - feedBottomReservePx() - feedTopOffsetPx()),
+  );
 }
 
 export function isGoogleAuthUrl(url: string): boolean {
@@ -158,7 +172,7 @@ export function isGoogleAuthUrl(url: string): boolean {
 }
 
 async function closeAllPopups(): Promise<void> {
-  const ids = [...popupIds];
+  const ids = [...popupIds].filter((id) => id !== browserId);
   popupIds.clear();
   await Promise.all(
     ids.map(async (id) => {
@@ -239,7 +253,9 @@ async function attachListeners(): Promise<void> {
         popupIds.delete(event.id);
         return;
       }
-      if (!event.id || event.id === browserId) {
+      // Never drop the main Feed WebView id on a bare close without id —
+      // that used to force a cold reopen and looked like a lost session.
+      if (event.id && event.id === browserId) {
         opened = false;
         browserId = null;
       }
@@ -247,7 +263,7 @@ async function attachListeners(): Promise<void> {
   );
   listeners.push(
     await InAppBrowser.addListener("hideEvent", () => {
-      // keep browserId
+      // Hide keeps cookies + SPA state; browserId stays.
     }),
   );
 }
@@ -274,7 +290,7 @@ async function resizeFeed(): Promise<void> {
       height: feedHeight(),
       width: window.innerWidth,
       x: 0,
-      y: 0,
+      y: feedTopOffsetPx(),
     });
   } catch {
     // ignore
@@ -356,12 +372,13 @@ export async function openXFeed(options: {
       return;
     }
 
+    const startHidden = !feedRouteActive || uiSuspended;
     const { id } = await InAppBrowser.openWebView({
       url: currentUrl && currentUrl !== "about:blank" ? currentUrl : X_FEED_URL,
       height: feedHeight(),
       width: window.innerWidth,
       x: 0,
-      y: 0,
+      y: feedTopOffsetPx(),
       toolbarType: ToolBarType.BLANK,
       toolbarColor: "#0a0a0a",
       toolbarTextColor: "#d4a017",
@@ -371,12 +388,18 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
+      // Keep Feed below status bar / above gesture nav.
+      enabledSafeTopMargin: true,
+      useTopInset: true,
+      enabledSafeBottomMargin: false,
       // Needed for X "Sign in with Google" GSI popup (postMessage back to x.com).
       enableGooglePaySupport: true,
       hiddenPopupWindow: false,
       blockedHosts: AD_BLOCKED_HOSTS,
       outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,
       isPresentAfterPageLoad: true,
+      // Prefetch off-Feed so first open + return visits keep the same WebView/session.
+      hidden: startHidden,
       // CSS-only ad hide on x.com — never runs on Google documents.
       preShowScript: AD_KILL_PRESHOW_SCRIPT,
       preShowScriptInjectionTime: "documentStart",
@@ -385,8 +408,12 @@ export async function openXFeed(options: {
     browserId = id;
     opened = true;
 
-    if (!feedRouteActive || uiSuspended) {
-      await InAppBrowser.hide({ id: browserId });
+    if (startHidden) {
+      try {
+        await InAppBrowser.hide({ id: browserId });
+      } catch {
+        // already hidden
+      }
     } else {
       await resizeFeed();
       await injectFeedScripts();
@@ -396,6 +423,32 @@ export async function openXFeed(options: {
   });
 
   await opening;
+}
+
+/**
+ * Open the Feed WebView in the background (cookies + X SPA stay warm).
+ * Call once after sign-in so tab switches don't recreate the WebView.
+ */
+export async function warmXFeed(): Promise<void> {
+  if (!isNativeApp() || opened || opening) return;
+  const prevRoute = feedRouteActive;
+  feedRouteActive = false;
+  try {
+    await openXFeed({
+      onUrlChange: (url) => {
+        currentUrl = url;
+        onUrlChangeCb?.(url);
+      },
+      onSaveRequest: (url) => {
+        onSaveRequestCb?.(url);
+      },
+      onAuthHint: (message) => {
+        onAuthHintCb?.(message);
+      },
+    });
+  } finally {
+    feedRouteActive = prevRoute;
+  }
 }
 
 export async function hideXFeed(): Promise<void> {

@@ -14,6 +14,8 @@ const config: CapacitorConfig = {
     StatusBar: {
       style: "DARK",
       backgroundColor: "#0a0a0a",
+      // Keep app + Feed WebView below the status bar (not under it).
+      overlaysWebView: false,
     },
   },
 };

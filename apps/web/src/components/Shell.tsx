@@ -16,6 +16,7 @@ import {
   isNativeApp,
   setFeedRouteActive,
   showXFeed,
+  warmXFeed,
 } from "../lib/xFeed";
 import { getFeedChromeState, subscribeFeedChrome } from "../lib/feedUi";
 import { useEffect, useState } from "react";
@@ -36,6 +37,12 @@ export function Shell() {
   );
 
   useEffect(() => subscribeFeedChrome(setFeedChrome), []);
+
+  // Prefetch Feed WebView once so login cookies survive tab switches / faster open.
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    void warmXFeed();
+  }, []);
 
   // Shell owns Feed WebView visibility so X login survives tab switches.
   useEffect(() => {
@@ -63,8 +70,8 @@ export function Shell() {
     };
   }, [onFeed, navigate]);
 
-  const showBookmark =
-    onFeed && isNativeApp() && (feedChrome.canBookmark || feedChrome.busy);
+  // Always show the bookmark FAB on Feed (disabled until a tweet URL is open).
+  const showBookmark = onFeed && isNativeApp();
 
   return (
     <div className={`app-shell${onFeed ? " app-shell--feed" : ""}`}>
@@ -76,7 +83,7 @@ export function Shell() {
           bottom: 0,
           left: 0,
           right: 0,
-          zIndex: 10,
+          zIndex: 30,
           borderRadius: 0,
           borderLeft: "none",
           borderRight: "none",
@@ -108,27 +115,39 @@ export function Shell() {
           />
         </BottomNavigation>
         {showBookmark ? (
-          <Tooltip title="Save to folder">
-            <IconButton
-              color="primary"
-              disabled={feedChrome.busy || !feedChrome.canBookmark}
-              onClick={() => feedChrome.onBookmark?.()}
-              aria-label="Bookmark tweet"
-              sx={{
-                position: "absolute",
-                right: 10,
-                bottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
-                bgcolor: "primary.main",
-                color: "background.default",
-                boxShadow: 2,
-                "&:hover": { bgcolor: "primary.dark" },
-                "&.Mui-disabled": {
-                  bgcolor: "action.disabledBackground",
-                },
-              }}
-            >
-              <BookmarkAddIcon />
-            </IconButton>
+          <Tooltip
+            title={
+              feedChrome.canBookmark
+                ? "Save to folder"
+                : "Open a tweet, then tap Bookmark"
+            }
+          >
+            <span>
+              <IconButton
+                color="primary"
+                disabled={feedChrome.busy || !feedChrome.canBookmark}
+                onClick={() => feedChrome.onBookmark?.()}
+                aria-label="Bookmark tweet"
+                sx={{
+                  position: "absolute",
+                  right: 10,
+                  bottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
+                  zIndex: 20,
+                  bgcolor: "primary.main",
+                  color: "background.default",
+                  boxShadow: 3,
+                  width: 48,
+                  height: 48,
+                  "&:hover": { bgcolor: "primary.dark" },
+                  "&.Mui-disabled": {
+                    bgcolor: "action.disabledBackground",
+                    color: "text.disabled",
+                  },
+                }}
+              >
+                <BookmarkAddIcon />
+              </IconButton>
+            </span>
           </Tooltip>
         ) : null}
       </Paper>

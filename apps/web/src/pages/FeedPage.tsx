@@ -2,10 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Snackbar from "@mui/material/Snackbar";
 import Typography from "@mui/material/Typography";
-import { GoogleLoginHelp } from "../components/GoogleLoginHelp";
 import { SaveTweetDialog } from "../components/SaveTweetDialog";
 import {
   clearFeedChromeState,
@@ -33,7 +31,6 @@ export function FeedPage() {
   const [pickerPermalink, setPickerPermalink] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [feedError, setFeedError] = useState<string | null>(null);
-  const [googleHelp, setGoogleHelp] = useState(false);
 
   const tweetId = tweetIdFromFeedUrl(feedUrl);
 
@@ -63,6 +60,7 @@ export function FeedPage() {
 
   useEffect(() => {
     if (!native) return;
+    // Always expose the FAB on Feed; disable until the URL is a status page.
     setFeedChromeState({
       canBookmark: Boolean(tweetId),
       onBookmark: () => {
@@ -104,6 +102,7 @@ export function FeedPage() {
       cancelled = true;
       unbindResize();
       clearFeedChromeState();
+      // Do not close the WebView — Shell hides it so the X session stays warm.
     };
   }, [native, openPickerForUrl]);
 
@@ -163,37 +162,20 @@ export function FeedPage() {
         }}
       />
 
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={() => setGoogleHelp(true)}
-        sx={{
-          position: "fixed",
-          top: 8,
-          right: 8,
-          zIndex: 25,
-          bgcolor: "background.paper",
-        }}
-      >
-        Login help
-      </Button>
-
       {feedError ? (
         <Alert
           severity="error"
-          sx={{ position: "fixed", top: 8, left: 8, right: 8, zIndex: 30 }}
+          sx={{
+            position: "fixed",
+            top: "calc(8px + env(safe-area-inset-top, 0px))",
+            left: 8,
+            right: 8,
+            zIndex: 30,
+          }}
         >
           {feedError}
         </Alert>
       ) : null}
-
-      <GoogleLoginHelp
-        open={googleHelp}
-        onClose={() => {
-          setGoogleHelp(false);
-          void showXFeed();
-        }}
-      />
 
       <SaveTweetDialog
         open={pickerOpen}
