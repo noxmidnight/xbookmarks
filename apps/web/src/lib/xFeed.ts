@@ -6,7 +6,6 @@ import {
   ToolBarType,
 } from "@capgo/capacitor-inappbrowser";
 import { extractTweetIdFromUrl } from "@xbookmarks/shared";
-import { openInBrave } from "./braveBrowser";
 import {
   AD_BLOCKED_HOSTS,
   AD_KILL_PRESHOW_SCRIPT,
@@ -59,7 +58,7 @@ const FEED_PAGE_SCRIPT = `
     var origOpen = window.open;
     window.open = function (url) {
       var s = url == null ? "" : String(url);
-      if (/accounts\\.google\\.com|google\\.[^"'\\s]+\\/(gsi|o\\/oauth2|signin)/i.test(s)) {
+      if (/accounts\\.google|myaccount\\.google|google\\.[^"'\\s]+\\/(gsi|o\\/oauth2|signin|accounts)/i.test(s)) {
         try {
           window.mobileApp.postMessage({ type: "xbookmarks-block-google", url: s });
         } catch (e) {}
@@ -165,10 +164,26 @@ export function isGoogleAuthUrl(url: string): boolean {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
-    if (host === "accounts.google.com" || host.endsWith(".accounts.google.com")) {
+    const path = `${u.pathname}${u.search}`;
+    if (
+      host === "accounts.google.com" ||
+      host.endsWith(".accounts.google.com") ||
+      host === "myaccount.google.com" ||
+      host.endsWith(".myaccount.google.com") ||
+      host === "accounts.youtube.com" ||
+      host === "oauthaccountmanager.googleapis.com"
+    ) {
       return true;
     }
-    if (host.includes("google.") && /\/(gsi|o\/oauth2|signin)\b/i.test(u.pathname)) {
+    if (host === "google.com" || host === "www.google.com") {
+      return /\/(accounts|signin|oauth|AccountChooser|ServiceLogin|v3\/signin|gsi)\b/i.test(
+        path,
+      );
+    }
+    if (
+      host.includes("google.") &&
+      /\/(gsi|o\/oauth2|signin|accounts|AccountChooser)\b/i.test(path)
+    ) {
       return true;
     }
     return false;
@@ -192,19 +207,7 @@ async function closeAllPopups(): Promise<void> {
 }
 
 async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
-  if (googleAuthHandled) {
-    if (sourceId && sourceId !== browserId) {
-      popupIds.delete(sourceId);
-      try {
-        await InAppBrowser.close({ id: sourceId });
-      } catch {
-        // ignore
-      }
-    }
-    return;
-  }
-  googleAuthHandled = true;
-
+  // Always dismiss Google popups / surfaces — never leave them covering the app.
   if (sourceId && sourceId !== browserId) {
     popupIds.delete(sourceId);
     try {
@@ -213,26 +216,32 @@ async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
       // ignore
     }
   }
-
   await closeAllPopups();
 
-  // Google works in a real browser. Prefer Brave Custom Tabs over Chrome.
-  const brave = await openInBrave(X_LOGIN_URL);
-  onAuthHintCb?.(
-    brave.brave
-      ? "Opened X login in Brave — use Google there if you want. In the app Feed, sign in with username & password (or Apple)."
-      : "Google can’t finish inside the app. Use username & password (or Apple) on X, or install Brave.",
-  );
+  if (!googleAuthHandled) {
+    googleAuthHandled = true;
+    onAuthHintCb?.(
+      "Google sign-in is blocked in the app. Use username & password (or Apple). Or Settings → Open X login in Brave.",
+    );
+  }
 
-  if (browserId) {
+  if (!browserId) return;
+
+  // Hard-navigate main Feed off Google every time (do not leave account home painted).
+  try {
+    await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
+    currentUrl = X_LOGIN_URL;
+    onUrlChangeCb?.(X_LOGIN_URL);
+    if (feedRouteActive && !uiSuspended) {
+      await InAppBrowser.show({ id: browserId });
+      await resizeFeed();
+    }
+  } catch {
     try {
-      await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
-      currentUrl = X_LOGIN_URL;
-      onUrlChangeCb?.(X_LOGIN_URL);
-      if (feedRouteActive && !uiSuspended) {
-        await InAppBrowser.show({ id: browserId });
-        await resizeFeed();
-      }
+      await InAppBrowser.executeScript({
+        id: browserId,
+        code: `location.replace(${JSON.stringify(X_LOGIN_URL)});`,
+      });
     } catch {
       // ignore
     }
@@ -296,7 +305,15 @@ async function attachListeners(): Promise<void> {
     }),
   );
   listeners.push(
-    await InAppBrowser.addListener("browserPageLoaded", () => {
+    await InAppBrowser.addListener("browserPageLoaded", (event) => {
+      const url =
+        event && typeof event === "object" && "url" in event
+          ? String((event as { url?: string }).url || "")
+          : currentUrl;
+      if (isGoogleAuthUrl(url) || isGoogleAuthUrl(currentUrl)) {
+        void bounceAwayFromGoogle(browserId ?? undefined);
+        return;
+      }
       void injectFeedScripts();
     }),
   );
@@ -456,8 +473,8 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
-      // Allow window.open, but keep popups hidden until we inspect the URL.
-      enableGooglePaySupport: true,
+      // No Google Pay / GSI popup support — Google Sign-In cannot work in WebView.
+      enableGooglePaySupport: false,
       hiddenPopupWindow: true,
       blockedHosts: AD_BLOCKED_HOSTS,
       outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,

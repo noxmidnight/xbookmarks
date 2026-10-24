@@ -1,9 +1,11 @@
 import type { NativeProxyRule } from "@capgo/capacitor-inappbrowser";
 
+const X_LOGIN =
+  "https://x.com/i/flow/login?redirect_after_login=%2Fhome";
+
 /**
  * Block ad / tracker hosts so their JS never loads into the Feed WebView.
- * (First-party “Promoted” timeline cards are still DOM-hidden — those are
- * served inside x.com’s own app JS, not separate ad scripts.)
+ * Also block Google account hosts (Sign-In is broken in WebViews anyway).
  */
 export const AD_BLOCKED_HOSTS: string[] = [
   "ads-twitter.com",
@@ -35,9 +37,15 @@ export const AD_BLOCKED_HOSTS: string[] = [
   "*.amazon-adsystem.com",
   "adservice.google.com",
   "adservice.google.*",
-  // Google Sign-In is blocked in WebViews anyway — never load the interstitial.
+  // Google account / Sign-In surfaces (main-frame navigations)
   "accounts.google.com",
   "*.accounts.google.com",
+  "myaccount.google.com",
+  "*.myaccount.google.com",
+  "oauthaccountmanager.googleapis.com",
+  "accounts.youtube.com",
+  "www.google.com",
+  "google.com",
 ];
 
 /** Native cancel — request never completes; script body never executes. */
@@ -48,8 +56,28 @@ export const AD_OUTBOUND_CANCEL_RULES: NativeProxyRule[] = [
     action: "cancel",
   },
   {
+    id: "google-myaccount",
+    urlRegex: "^https?://([^/]*\\.)?myaccount\\.google\\.com/.*",
+    action: "cancel",
+  },
+  {
+    id: "google-com-accounts",
+    urlRegex: "^https?://(www\\.)?google\\.com/(accounts|signin|oauth|AccountChooser).*",
+    action: "cancel",
+  },
+  {
     id: "google-gsi",
-    urlRegex: "^https?://([^/]*\\.)?google\\.[a-z.]+/(gsi|o/oauth2)/.*",
+    urlRegex: "^https?://([^/]*\\.)?google\\.[a-z.]+/(gsi|o/oauth2|signin|accounts)/.*",
+    action: "cancel",
+  },
+  {
+    id: "google-oauth-mgr",
+    urlRegex: "^https?://oauthaccountmanager\\.googleapis\\.com/.*",
+    action: "cancel",
+  },
+  {
+    id: "youtube-accounts",
+    urlRegex: "^https?://accounts\\.youtube\\.com/.*",
     action: "cancel",
   },
   {
@@ -135,20 +163,119 @@ export const AD_OUTBOUND_CANCEL_RULES: NativeProxyRule[] = [
 ];
 
 /**
- * Runs at documentStart (before page JS) via Capgo preShowScript.
- * Neutrals any ad <script> that slips past native cancel, and aborts
- * fetch/XHR to blocked hosts so their code cannot execute.
+ * documentStart script:
+ * 1) If this is a Google account page → immediate redirect to X username login
+ * 2) On X → hide Google buttons + block ads
  */
 export const AD_KILL_PRESHOW_SCRIPT = `
 (function () {
-  // Never run on Google / non-X pages — hooks here break Google Sign-In.
-  var pageHost = (location && location.hostname) || "";
-  if (!/(^|\\.)(x|twitter)\\.com$/i.test(pageHost)) return;
+  var X_LOGIN = ${JSON.stringify(X_LOGIN)};
+  var host = ((location && location.hostname) || "").toLowerCase();
+  var href = (location && location.href) || "";
+
+  function isGoogleAccountSurface() {
+    if (!host) return false;
+    if (
+      host === "accounts.google.com" ||
+      host.slice(-20) === ".accounts.google.com" ||
+      host === "myaccount.google.com" ||
+      host.slice(-21) === ".myaccount.google.com" ||
+      host === "accounts.youtube.com" ||
+      host === "oauthaccountmanager.googleapis.com"
+    ) {
+      return true;
+    }
+    if (host === "google.com" || host === "www.google.com") {
+      return /\\/(accounts|signin|oauth|AccountChooser|ServiceLogin|v3\\/signin|gsi)\\b/i.test(href);
+    }
+    if (/google\\./i.test(host) && /\\/(gsi|o\\/oauth2|signin|accounts|AccountChooser)\\b/i.test(href)) {
+      return true;
+    }
+    return false;
+  }
+
+  // Escape Google immediately — do not paint the account / clear-cookies page.
+  if (isGoogleAccountSurface()) {
+    try {
+      location.replace(X_LOGIN);
+    } catch (e) {
+      location.href = X_LOGIN;
+    }
+    return;
+  }
+
+  // From here: X / Twitter pages only.
+  if (!/(^|\\.)(x|twitter)\\.com$/i.test(host)) return;
+
+  if (!window.__xbookmarksGoogleBtnBlock) {
+    window.__xbookmarksGoogleBtnBlock = true;
+
+    var STYLE_G = "xbookmarks-hide-google-btn";
+    function hideGoogleButtons() {
+      if (!document.getElementById(STYLE_G)) {
+        var s = document.createElement("style");
+        s.id = STYLE_G;
+        s.textContent = [
+          '[data-testid="google_sign_in_container"],',
+          '[data-testid*="google" i],',
+          'div[aria-label*="Google" i],',
+          'button[aria-label*="Google" i],',
+          'a[href*="accounts.google.com"],',
+          'iframe[src*="accounts.google.com"],',
+          'iframe[src*="gsi/"] { display: none !important; }'
+        ].join("\\n");
+        (document.head || document.documentElement).appendChild(s);
+      }
+      document.querySelectorAll("span,div,button,a").forEach(function (el) {
+        var t = (el.textContent || "").trim();
+        if (
+          t === "Sign in with Google" ||
+          t === "Continue with Google" ||
+          t === "Sign up with Google"
+        ) {
+          var node = el.closest("button,a,div[role=button]") || el;
+          node.style.setProperty("display", "none", "important");
+          node.style.setProperty("pointer-events", "none", "important");
+        }
+      });
+    }
+
+    document.addEventListener(
+      "click",
+      function (ev) {
+        var t = ev.target;
+        if (!t || !t.closest) return;
+        var hit = t.closest("button,a,div[role=button],div[data-testid]");
+        if (!hit) return;
+        var label = ((hit.getAttribute("aria-label") || "") + " " + (hit.textContent || "")).toLowerCase();
+        var href = (hit.getAttribute("href") || "").toLowerCase();
+        if (
+          label.indexOf("google") !== -1 ||
+          href.indexOf("accounts.google") !== -1 ||
+          href.indexOf("gsi/") !== -1
+        ) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try {
+            window.mobileApp.postMessage({ type: "xbookmarks-block-google", url: href || "google-btn" });
+          } catch (e) {}
+          return false;
+        }
+      },
+      true,
+    );
+
+    hideGoogleButtons();
+    new MutationObserver(hideGoogleButtons).observe(document.documentElement || document, {
+      childList: true,
+      subtree: true,
+    });
+  }
 
   if (window.__xbookmarksAdKill) return;
   window.__xbookmarksAdKill = true;
 
-  var HOST_RE = /(^|\\.)((ads-twitter\\.com)|(static\\.ads-twitter\\.com)|(ads\\.twitter\\.com)|(ads-api\\.twitter\\.com)|(ads-bidder-api\\.twitter\\.com)|(analytics\\.twitter\\.com)|(advertise\\.twitter\\.com)|(advertising\\.twitter\\.com)|(syndication\\.twitter\\.com)|(doubleclick\\.net)|(googlesyndication\\.com)|(googleadservices\\.com)|(googletagservices\\.com)|(moatads\\.com)|(adsrvr\\.org)|(scorecardresearch\\.com)|(amazon-adsystem\\.com)|(adservice\\.google\\.com))$/i;
+  var HOST_RE = /(^|\\.)((ads-twitter\\.com)|(static\\.ads-twitter\\.com)|(ads\\.twitter\\.com)|(ads-api\\.twitter\\.com)|(ads-bidder-api\\.twitter\\.com)|(analytics\\.twitter\\.com)|(advertise\\.twitter\\.com)|(advertising\\.twitter\\.com)|(syndication\\.twitter\\.com)|(doubleclick\\.net)|(googlesyndication\\.com)|(googleadservices\\.com)|(googletagservices\\.com)|(moatads\\.com)|(adsrvr\\.org)|(scorecardresearch\\.com)|(amazon-adsystem\\.com)|(adservice\\.google\\.com)|(accounts\\.google\\.com)|(myaccount\\.google\\.com))$/i;
   var PATH_RE = /\\/i\\/(adsct|jot)(\\/|$|\\?)/i;
 
   function isBad(url) {
