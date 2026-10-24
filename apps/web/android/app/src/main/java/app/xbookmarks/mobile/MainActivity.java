@@ -21,6 +21,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BraveBrowserPlugin.class);
+        registerPlugin(SystemInsetsPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Keep system nav/status bars from drawing under our WebView chrome.
@@ -42,6 +43,14 @@ public class MainActivity extends BridgeActivity {
 
         // Debug-only: chrome://inspect for the host WebView
         WebView.setWebContentsDebuggingEnabled(true);
+    }
+
+    @Override
+    public void onPause() {
+        // WebView only flushes cookies to disk periodically; persist X auth
+        // before Android may kill the process in the background.
+        CookieManager.getInstance().flush();
+        super.onPause();
     }
 
     @Override

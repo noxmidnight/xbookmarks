@@ -20,7 +20,22 @@ async function initNativeChrome() {
   }
 }
 
+async function dropNativeServiceWorkers() {
+  if (!Capacitor.isNativePlatform() || !("serviceWorker" in navigator)) return;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    // best effort
+  }
+}
+
 void initNativeChrome();
+void dropNativeServiceWorkers();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "cap:sync": "cap sync android",
-    "android:build": "tsc -b && vite build && cap sync android && node ./scripts/android-assemble.mjs",
+    "android:build": "tsc -b && vite build --mode capacitor && cap sync android && node ./scripts/android-assemble.mjs",
     "android:open": "cap open android"
   },
   "dependencies": {

@@ -1,4 +1,8 @@
-import { Capacitor, type PluginListenerHandle } from "@capacitor/core";
+import {
+  Capacitor,
+  registerPlugin,
+  type PluginListenerHandle,
+} from "@capacitor/core";
 import {
   BackgroundColor,
   CloseAction,
@@ -140,20 +144,32 @@ export function setFeedRouteActive(active: boolean): void {
 }
 
 export function feedBottomReservePx(): number {
-  // Tab bar + home-indicator inset. Small buffer so the native WebView
-  // never covers the bookmark FAB sitting in the tab strip.
-  return TAB_BAR_PX + measureSafeAreaBottom() + 4;
+  return TAB_BAR_PX + measureSafeAreaBottom();
 }
 
-function feedTopOffsetPx(): number {
-  // Capgo dialog is often edge-to-edge even when the host activity is not.
-  return measureSafeAreaTop();
+type SystemInsets = { top: number; bottom: number };
+const SystemInsetsNative = registerPlugin<{
+  get(): Promise<SystemInsets>;
+}>("SystemInsets");
+let statusBarPx = 0;
+
+async function refreshSystemInsets(): Promise<void> {
+  try {
+    statusBarPx = (await SystemInsetsNative.get()).top;
+  } catch {
+    statusBarPx = measureSafeAreaTop();
+  }
 }
 
+/**
+ * The Feed dialog is laid out from the top of the screen (it pads the status
+ * bar itself), while window.innerHeight excludes the status bar — so the
+ * status bar height must be added back for the WebView to reach the tab bar.
+ */
 function feedHeight(): number {
   return Math.max(
     240,
-    Math.floor(window.innerHeight - feedBottomReservePx() - feedTopOffsetPx()),
+    Math.floor(statusBarPx + window.innerHeight - feedBottomReservePx()),
   );
 }
 
@@ -258,6 +274,9 @@ async function attachListeners(): Promise<void> {
       if (event.id && event.id === browserId) {
         opened = false;
         browserId = null;
+        // Reopening on the login flow looks like a lost session even when
+        // the auth cookies are still there.
+        if (/\/i\/flow\/login/.test(currentUrl)) currentUrl = X_FEED_URL;
       }
     }),
   );
@@ -290,7 +309,7 @@ async function resizeFeed(): Promise<void> {
       height: feedHeight(),
       width: window.innerWidth,
       x: 0,
-      y: feedTopOffsetPx(),
+      y: 0,
     });
   } catch {
     // ignore
@@ -372,13 +391,14 @@ export async function openXFeed(options: {
       return;
     }
 
+    await refreshSystemInsets();
     const startHidden = !feedRouteActive || uiSuspended;
     const { id } = await InAppBrowser.openWebView({
       url: currentUrl && currentUrl !== "about:blank" ? currentUrl : X_FEED_URL,
       height: feedHeight(),
       width: window.innerWidth,
       x: 0,
-      y: feedTopOffsetPx(),
+      y: 0,
       toolbarType: ToolBarType.BLANK,
       toolbarColor: "#0a0a0a",
       toolbarTextColor: "#d4a017",
@@ -392,6 +412,10 @@ export async function openXFeed(options: {
       enabledSafeTopMargin: true,
       useTopInset: true,
       enabledSafeBottomMargin: false,
+      // Android back walks X history; at the root it is ignored instead of
+      // dismissing (which destroyed the WebView and the loaded session).
+      activeNativeNavigationForWebview: true,
+      disableGoBackOnNativeApplication: true,
       // Needed for X "Sign in with Google" GSI popup (postMessage back to x.com).
       enableGooglePaySupport: true,
       hiddenPopupWindow: false,
@@ -431,24 +455,13 @@ export async function openXFeed(options: {
  */
 export async function warmXFeed(): Promise<void> {
   if (!isNativeApp() || opened || opening) return;
-  const prevRoute = feedRouteActive;
-  feedRouteActive = false;
-  try {
-    await openXFeed({
-      onUrlChange: (url) => {
-        currentUrl = url;
-        onUrlChangeCb?.(url);
-      },
-      onSaveRequest: (url) => {
-        onSaveRequestCb?.(url);
-      },
-      onAuthHint: (message) => {
-        onAuthHintCb?.(message);
-      },
-    });
-  } finally {
-    feedRouteActive = prevRoute;
-  }
+  // FeedPage replaces these when it mounts; placeholders must not reference
+  // the module callbacks or openXFeed would make them call themselves.
+  await openXFeed({
+    onUrlChange: onUrlChangeCb ?? (() => {}),
+    onSaveRequest: onSaveRequestCb ?? (() => {}),
+    onAuthHint: onAuthHintCb ?? undefined,
+  });
 }
 
 export async function hideXFeed(): Promise<void> {
@@ -596,7 +609,7 @@ export async function resetFeedLogin(): Promise<void> {
 export function bindFeedResizeListener(): () => void {
   if (!isNativeApp()) return () => {};
   const onResize = () => {
-    void resizeFeed();
+    void refreshSystemInsets().then(resizeFeed);
   };
   window.addEventListener("resize", onResize);
   return () => window.removeEventListener("resize", onResize);

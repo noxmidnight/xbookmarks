@@ -100,6 +100,8 @@ export function Shell() {
             maxWidth: 640,
             mx: "auto",
             position: "relative",
+            // Reserve a slot on the right so the bookmark button never covers a tab.
+            pr: showBookmark ? "60px" : 0,
           }}
         >
           <BottomNavigationAction
@@ -130,8 +132,8 @@ export function Shell() {
                 aria-label="Bookmark tweet"
                 sx={{
                   position: "absolute",
-                  right: 10,
-                  bottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
+                  right: 8,
+                  top: 4,
                   zIndex: 20,
                   bgcolor: "primary.main",
                   color: "background.default",
