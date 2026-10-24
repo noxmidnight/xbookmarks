@@ -12,6 +12,7 @@ import {
   AD_OUTBOUND_CANCEL_RULES,
 } from "./feedAdBlock";
 import { measureSafeAreaBottom, TAB_BAR_PX } from "./safeArea";
+import { openXGoogleLoginInBrave } from "./xGoogleLogin";
 
 export const X_FEED_URL = "https://x.com/home";
 /** Username/password login — Google Sign-In is blocked inside Android WebViews. */
@@ -218,24 +219,31 @@ async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
   }
   await closeAllPopups();
 
+  // Hide Feed WebView while Brave handles Google (WebView cannot complete Google OAuth).
+  if (browserId) {
+    try {
+      await InAppBrowser.hide({ id: browserId });
+    } catch {
+      // ignore
+    }
+  }
+
   if (!googleAuthHandled) {
     googleAuthHandled = true;
     onAuthHintCb?.(
-      "Google sign-in is blocked in the app. Use username & password (or Apple). Or Settings → Open X login in Brave.",
+      "GOOGLE_BRAVE_FLOW",
     );
   }
 
-  if (!browserId) return;
+  // Real Google Sign-In for X-only-via-Google accounts.
+  await openXGoogleLoginInBrave();
 
-  // Hard-navigate main Feed off Google every time (do not leave account home painted).
+  // Keep WebView on X login (username/password after they set one in Brave).
+  if (!browserId) return;
   try {
     await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
     currentUrl = X_LOGIN_URL;
     onUrlChangeCb?.(X_LOGIN_URL);
-    if (feedRouteActive && !uiSuspended) {
-      await InAppBrowser.show({ id: browserId });
-      await resizeFeed();
-    }
   } catch {
     try {
       await InAppBrowser.executeScript({

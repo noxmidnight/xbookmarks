@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { isBraveInstalled, openInBrave } from "../lib/braveBrowser";
+import { isBraveInstalled } from "../lib/braveBrowser";
 import { OWNER_EMAIL } from "../lib/owner";
-import { isNativeApp, resetFeedLogin, X_LOGIN_URL } from "../lib/xFeed";
+import { isNativeApp, resetFeedLogin } from "../lib/xFeed";
+import {
+  openXGoogleLoginInBrave,
+  openXPasswordSettingsInBrave,
+} from "../lib/xGoogleLogin";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -76,19 +80,22 @@ export function SettingsPage() {
           <Card>
             <CardContent>
               <Stack spacing={1.5}>
-                <Typography sx={{ fontWeight: 700 }}>X Feed login</Typography>
+                <Typography sx={{ fontWeight: 700 }}>
+                  X login (Google-only accounts)
+                </Typography>
                 <Typography color="text.secondary" variant="body2">
-                  The in-app Feed uses Android System WebView (not the Chrome or
-                  Brave apps). Google Sign-In is blocked there. External opens
-                  prefer <strong>Brave</strong> when it’s installed.
+                  If you can only sign into X with Google: Android blocks that
+                  inside the app. Sign in with Google in <strong>Brave</strong>,
+                  set an <strong>X password</strong> once, then use{" "}
+                  <strong>@username + password</strong> in the Feed.
                 </Typography>
                 <Typography color="text.secondary" variant="body2">
                   Brave:{" "}
                   {braveOk === null
                     ? "…"
                     : braveOk
-                      ? "installed — preferred for external login"
-                      : "not installed — install Brave to use it for Google login"}
+                      ? "installed"
+                      : "not installed — install Brave first"}
                 </Typography>
                 <Button
                   variant="contained"
@@ -97,28 +104,38 @@ export function SettingsPage() {
                     void (async () => {
                       setFeedBusy(true);
                       setFeedMsg(null);
-                      try {
-                        const result = await openInBrave(X_LOGIN_URL);
-                        setFeedMsg(
-                          result.brave
-                            ? "Opened X login in Brave."
-                            : result.opened
-                              ? "Opened X login in your system browser."
-                              : "Could not open a browser.",
-                        );
-                      } catch (err) {
-                        setFeedMsg(
-                          err instanceof Error
-                            ? err.message
-                            : "Could not open Brave",
-                        );
-                      } finally {
-                        setFeedBusy(false);
-                      }
+                      const result = await openXGoogleLoginInBrave();
+                      setFeedMsg(
+                        result.brave
+                          ? "Brave opened — tap Sign in with Google there."
+                          : result.opened
+                            ? "Browser opened — use Google sign-in there."
+                            : "Could not open a browser. Install Brave.",
+                      );
+                      setFeedBusy(false);
                     })();
                   }}
                 >
-                  Open X login in Brave
+                  Sign in with Google in Brave
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={feedBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setFeedBusy(true);
+                      setFeedMsg(null);
+                      const result = await openXPasswordSettingsInBrave();
+                      setFeedMsg(
+                        result.opened
+                          ? "Set a password for your X account, then return to Feed."
+                          : "Could not open password settings.",
+                      );
+                      setFeedBusy(false);
+                    })();
+                  }}
+                >
+                  Set X password in Brave
                 </Button>
                 <Button
                   variant="outlined"
@@ -130,7 +147,7 @@ export function SettingsPage() {
                       try {
                         await resetFeedLogin();
                         setFeedMsg(
-                          "Feed cookies cleared — use username & password in Feed.",
+                          "Feed ready — sign in with @username + the password you set.",
                         );
                         navigate("/feed");
                       } catch (err) {
@@ -145,7 +162,7 @@ export function SettingsPage() {
                     })();
                   }}
                 >
-                  {feedBusy ? "Working…" : "Reset Feed login"}
+                  Open Feed login
                 </Button>
                 {feedMsg ? <Alert severity="info">{feedMsg}</Alert> : null}
               </Stack>

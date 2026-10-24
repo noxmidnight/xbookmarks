@@ -2,13 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Snackbar from "@mui/material/Snackbar";
 import Typography from "@mui/material/Typography";
+import { GoogleLoginHelp } from "../components/GoogleLoginHelp";
 import { SaveTweetDialog } from "../components/SaveTweetDialog";
 import {
   clearFeedChromeState,
   setFeedChromeState,
 } from "../lib/feedUi";
+import { openXGoogleLoginInBrave } from "../lib/xGoogleLogin";
 import {
   bindFeedResizeListener,
   feedBottomReservePx,
@@ -31,6 +34,7 @@ export function FeedPage() {
   const [pickerPermalink, setPickerPermalink] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [googleHelp, setGoogleHelp] = useState(false);
 
   const tweetId = tweetIdFromFeedUrl(feedUrl);
 
@@ -85,7 +89,13 @@ export function FeedPage() {
             if (!cancelled) openPickerForUrl(url);
           },
           onAuthHint: (message) => {
-            if (!cancelled) setToast(message);
+            if (cancelled) return;
+            if (message === "GOOGLE_BRAVE_FLOW") {
+              setGoogleHelp(true);
+              setToast("Continue Google sign-in in Brave…");
+              return;
+            }
+            setToast(message);
           },
         });
       } catch (err) {
@@ -101,8 +111,6 @@ export function FeedPage() {
       cancelled = true;
       unbindResize();
       clearFeedChromeState();
-      // Do NOT hide/close here — Shell owns tab visibility so X login survives
-      // switching away from Feed and back.
     };
   }, [native, openPickerForUrl]);
 
@@ -162,6 +170,21 @@ export function FeedPage() {
         }}
       />
 
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setGoogleHelp(true)}
+        sx={{
+          position: "fixed",
+          top: 8,
+          right: 8,
+          zIndex: 25,
+          bgcolor: "background.paper",
+        }}
+      >
+        Google login help
+      </Button>
+
       {feedError ? (
         <Alert
           severity="error"
@@ -170,6 +193,14 @@ export function FeedPage() {
           {feedError}
         </Alert>
       ) : null}
+
+      <GoogleLoginHelp
+        open={googleHelp}
+        onClose={() => {
+          setGoogleHelp(false);
+          void showXFeed();
+        }}
+      />
 
       <SaveTweetDialog
         open={pickerOpen}
@@ -181,10 +212,24 @@ export function FeedPage() {
 
       <Snackbar
         open={Boolean(toast)}
-        autoHideDuration={2500}
+        autoHideDuration={4000}
         onClose={() => setToast(null)}
         message={toast}
         anchorOrigin={{ vertical: "top", horizontal: "center" }}
+        action={
+          toast?.includes("Brave") ? (
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                setToast(null);
+                void openXGoogleLoginInBrave();
+              }}
+            >
+              Open
+            </Button>
+          ) : undefined
+        }
       />
     </>
   );
