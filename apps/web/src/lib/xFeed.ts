@@ -23,14 +23,14 @@ const CHROME_MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
 export type FeedAuthHintHandler = (message: string) => void;
+export type FeedUrlHandler = (url: string) => void;
+export type FeedSaveHandler = (url: string) => void;
 
 let onAuthHintCb: FeedAuthHintHandler | null = null;
-let googleAuthRedirected = false;
+let googleAuthHandled = false;
 
 /**
- * SPA URL tracking + hide first-party Promoted cards (DOM only).
- * Third-party ad JS is cancelled natively via blockedHosts / outboundProxyRules
- * and the documentStart preShowScript — not merely hidden.
+ * SPA URL tracking + block Google window.open + hide Promoted cards.
  */
 const FEED_PAGE_SCRIPT = `
 (function () {
@@ -54,6 +54,18 @@ const FEED_PAGE_SCRIPT = `
     history.replaceState = wrap(history.replaceState);
     window.addEventListener("popstate", notify);
     notify();
+
+    var origOpen = window.open;
+    window.open = function (url) {
+      var s = url == null ? "" : String(url);
+      if (/accounts\\.google\\.com|google\\.[^"'\\s]+\\/(gsi|o\\/oauth2|signin)/i.test(s)) {
+        try {
+          window.mobileApp.postMessage({ type: "xbookmarks-block-google", url: s });
+        } catch (e) {}
+        return null;
+      }
+      return origOpen.apply(this, arguments);
+    };
   }
 
   if (window.__xbookmarksAdHide) return;
@@ -101,10 +113,9 @@ const FEED_PAGE_SCRIPT = `
 })();
 `;
 
-export type FeedUrlHandler = (url: string) => void;
-export type FeedSaveHandler = (url: string) => void;
-
 let browserId: string | null = null;
+/** GSI / window.open popups — must be closed on tab switch or they cover the whole app. */
+const popupIds = new Set<string>();
 let currentUrl = X_FEED_URL;
 let listeners: PluginListenerHandle[] = [];
 let opened = false;
@@ -165,22 +176,77 @@ export function isGoogleAuthUrl(url: string): boolean {
   }
 }
 
-function applyUrl(url: string): void {
-  if (!url || url === currentUrl) return;
-  currentUrl = url;
-  onUrlChangeCb?.(url);
+async function closeAllPopups(): Promise<void> {
+  const ids = [...popupIds];
+  popupIds.clear();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        await InAppBrowser.close({ id });
+      } catch {
+        // already gone
+      }
+    }),
+  );
+}
 
-  // Google blocks OAuth inside embedded WebViews ("clear Chrome cookies" interstitial).
-  // Bounce to X username login so the user can finish signing in.
-  if (isGoogleAuthUrl(url) && !googleAuthRedirected && browserId) {
-    googleAuthRedirected = true;
-    onAuthHintCb?.(
-      "Google sign-in is blocked inside apps. Use username & password (or Apple) on the X login screen.",
-    );
-    void InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL }).catch(() => undefined);
+async function bounceAwayFromGoogle(sourceId?: string): Promise<void> {
+  if (googleAuthHandled) {
+    if (sourceId && sourceId !== browserId) {
+      popupIds.delete(sourceId);
+      try {
+        await InAppBrowser.close({ id: sourceId });
+      } catch {
+        // ignore
+      }
+    }
+    return;
   }
-  if (!isGoogleAuthUrl(url) && url.includes("x.com")) {
-    googleAuthRedirected = false;
+  googleAuthHandled = true;
+  onAuthHintCb?.(
+    "Google sign-in can’t run inside the app. Use username & password (or Apple) on X.",
+  );
+
+  if (sourceId && sourceId !== browserId) {
+    popupIds.delete(sourceId);
+    try {
+      await InAppBrowser.close({ id: sourceId });
+    } catch {
+      // ignore
+    }
+  }
+
+  await closeAllPopups();
+
+  if (browserId) {
+    try {
+      await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
+      currentUrl = X_LOGIN_URL;
+      onUrlChangeCb?.(X_LOGIN_URL);
+      if (feedRouteActive && !uiSuspended) {
+        await InAppBrowser.show({ id: browserId });
+        await resizeFeed();
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function applyUrl(url: string, sourceId?: string): void {
+  if (!url) return;
+  if (url !== currentUrl && (!sourceId || sourceId === browserId)) {
+    currentUrl = url;
+    onUrlChangeCb?.(url);
+  }
+
+  if (isGoogleAuthUrl(url)) {
+    void bounceAwayFromGoogle(sourceId);
+    return;
+  }
+
+  if (url.includes("x.com") || url.includes("twitter.com")) {
+    googleAuthHandled = false;
   }
 }
 
@@ -209,14 +275,17 @@ async function attachListeners(): Promise<void> {
   await clearListeners();
   listeners.push(
     await InAppBrowser.addListener("urlChangeEvent", (event) => {
-      applyUrl(event.url);
+      applyUrl(event.url, event.id);
     }),
   );
   listeners.push(
     await InAppBrowser.addListener("messageFromWebview", (event) => {
       const payload = parseWebviewMessage(event);
       if (payload?.type === "xbookmarks-url" && payload.url) {
-        applyUrl(payload.url);
+        applyUrl(payload.url, browserId ?? undefined);
+      }
+      if (payload?.type === "xbookmarks-block-google") {
+        void bounceAwayFromGoogle();
       }
     }),
   );
@@ -226,14 +295,37 @@ async function attachListeners(): Promise<void> {
     }),
   );
   listeners.push(
-    await InAppBrowser.addListener("closeEvent", () => {
-      opened = false;
-      browserId = null;
+    await InAppBrowser.addListener("popupWindowOpened", (event) => {
+      popupIds.add(event.id);
+      const url = event.url || "";
+      if (isGoogleAuthUrl(url) || !url) {
+        // Google GSI popup (or unknown) — never leave it covering the app.
+        void bounceAwayFromGoogle(event.id);
+        return;
+      }
+      // Keep non-Google popups from covering other tabs: hide unless Feed is active.
+      if (!feedRouteActive || uiSuspended) {
+        void InAppBrowser.close({ id: event.id }).then(() => {
+          popupIds.delete(event.id);
+        });
+      }
+    }),
+  );
+  listeners.push(
+    await InAppBrowser.addListener("closeEvent", (event) => {
+      if (event.id && popupIds.has(event.id)) {
+        popupIds.delete(event.id);
+        return;
+      }
+      if (!event.id || event.id === browserId) {
+        opened = false;
+        browserId = null;
+      }
     }),
   );
   listeners.push(
     await InAppBrowser.addListener("hideEvent", () => {
-      // closeAction HIDE or programmatic hide — keep browserId so we can show again
+      // keep browserId
     }),
   );
 }
@@ -251,7 +343,7 @@ async function injectFeedScripts(): Promise<void> {
 }
 
 async function resizeFeed(): Promise<void> {
-  if (!browserId || uiSuspended) return;
+  if (!browserId || uiSuspended || !feedRouteActive) return;
   try {
     await InAppBrowser.updateDimensions({
       id: browserId,
@@ -277,7 +369,7 @@ export async function readLiveFeedUrl(): Promise<string> {
       if (done) return;
       done = true;
       void handle?.remove();
-      applyUrl(url);
+      applyUrl(url, browserId ?? undefined);
       resolve(url);
     };
 
@@ -343,8 +435,6 @@ export async function openXFeed(options: {
       return;
     }
 
-    // Blank toolbar = no close (X) button. Bookmark lives in the app tab bar.
-    // Ad/tracker scripts are cancelled at the native network layer (never run).
     const { id } = await InAppBrowser.openWebView({
       url: currentUrl && currentUrl !== "about:blank" ? currentUrl : X_FEED_URL,
       height: feedHeight(),
@@ -360,9 +450,9 @@ export async function openXFeed(options: {
       backgroundColor: BackgroundColor.BLACK,
       customUserAgent: CHROME_MOBILE_UA,
       persistWebViewData: true,
-      // Needed so X "Sign in with Google" can open its GSI popup (postMessage back to x.com).
-      // Google still often blocks WebView OAuth — we then redirect to username login.
+      // Allow window.open, but keep popups hidden until we inspect the URL.
       enableGooglePaySupport: true,
+      hiddenPopupWindow: true,
       blockedHosts: AD_BLOCKED_HOSTS,
       outboundProxyRules: AD_OUTBOUND_CANCEL_RULES,
       isPresentAfterPageLoad: true,
@@ -387,7 +477,10 @@ export async function openXFeed(options: {
 }
 
 export async function hideXFeed(): Promise<void> {
-  if (!isNativeApp() || !browserId) return;
+  if (!isNativeApp()) return;
+  // Popups (e.g. Google auth) sit above the app — always dismiss them on tab switch.
+  await closeAllPopups();
+  if (!browserId) return;
   try {
     await InAppBrowser.hide({ id: browserId });
   } catch {
@@ -397,6 +490,9 @@ export async function hideXFeed(): Promise<void> {
 
 export async function showXFeed(): Promise<void> {
   if (!isNativeApp() || uiSuspended) return;
+
+  // Never leave a stray popup on screen when returning to Feed.
+  await closeAllPopups();
 
   if (!browserId || !opened) {
     if (onUrlChangeCb && onSaveRequestCb) {
@@ -410,6 +506,11 @@ export async function showXFeed(): Promise<void> {
   }
 
   try {
+    // If we were stuck on Google, force username login.
+    if (isGoogleAuthUrl(currentUrl)) {
+      await InAppBrowser.setUrl({ id: browserId, url: X_LOGIN_URL });
+      currentUrl = X_LOGIN_URL;
+    }
     await InAppBrowser.show({ id: browserId });
     await resizeFeed();
   } catch {
@@ -427,7 +528,6 @@ export async function showXFeed(): Promise<void> {
 
 /**
  * Navigate the in-app X Feed WebView to a permalink (bookmark Open).
- * Sets currentUrl so a not-yet-created WebView opens on this page.
  */
 export async function openUrlInFeed(url: string): Promise<void> {
   if (!url) return;
@@ -439,6 +539,8 @@ export async function openUrlInFeed(url: string): Promise<void> {
     window.open(url, "_blank", "noopener,noreferrer");
     return;
   }
+
+  await closeAllPopups();
 
   if (opened && browserId) {
     try {
@@ -465,8 +567,10 @@ export async function openUrlInFeed(url: string): Promise<void> {
 
 export async function closeXFeed(): Promise<void> {
   if (!isNativeApp()) return;
+  await closeAllPopups();
   try {
-    await InAppBrowser.close();
+    if (browserId) await InAppBrowser.close({ id: browserId });
+    else await InAppBrowser.close();
   } catch {
     // ignore
   }
@@ -475,16 +579,16 @@ export async function closeXFeed(): Promise<void> {
   opened = false;
   currentUrl = X_FEED_URL;
   uiSuspended = false;
-  googleAuthRedirected = false;
+  googleAuthHandled = false;
 }
 
 /**
  * Clear X/Google cookies in the Feed WebView and open the username login page.
- * Does not wipe Appwrite session cookies for unrelated hosts when possible.
  */
 export async function resetFeedLogin(): Promise<void> {
   if (!isNativeApp()) return;
-  googleAuthRedirected = false;
+  googleAuthHandled = false;
+  await closeAllPopups();
   const urls = [
     "https://x.com",
     "https://twitter.com",

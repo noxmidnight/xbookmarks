@@ -35,10 +35,23 @@ export const AD_BLOCKED_HOSTS: string[] = [
   "*.amazon-adsystem.com",
   "adservice.google.com",
   "adservice.google.*",
+  // Google Sign-In is blocked in WebViews anyway — never load the interstitial.
+  "accounts.google.com",
+  "*.accounts.google.com",
 ];
 
 /** Native cancel — request never completes; script body never executes. */
 export const AD_OUTBOUND_CANCEL_RULES: NativeProxyRule[] = [
+  {
+    id: "google-accounts",
+    urlRegex: "^https?://([^/]*\\.)?accounts\\.google\\.com/.*",
+    action: "cancel",
+  },
+  {
+    id: "google-gsi",
+    urlRegex: "^https?://([^/]*\\.)?google\\.[a-z.]+/(gsi|o/oauth2)/.*",
+    action: "cancel",
+  },
   {
     id: "ads-twitter",
     urlRegex: "^https?://([^/]*\\.)?ads-twitter\\.com/.*",
